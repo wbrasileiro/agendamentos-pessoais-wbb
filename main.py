@@ -333,23 +333,18 @@ def login_page():
         )
 
 
-# --- DASHBOARD DO USUÁRIO ---
+# --- DASHBOARD DO USUÁRIO REESTRUTURADO ---
 import io
 import re
 from datetime import datetime, timedelta
 from nicegui import app, ui
 from pypdf import PdfReader
 
-# Assuma que 'supabase', 'ADMIN_EMAIL', 'menu_drawer', 'cabecalho_app' e 'formatar_br' 
-# estão importados ou definidos no escopo principal do seu projeto.
-
-
 # ==========================================
 # 1. FUNÇÕES AUXILIARES E EXTRAÇÃO DE BOLETO
 # ==========================================
 
 def formatar_data_br(data_str):
-    """Converte data YYYY-MM-DD para DD/MM/AAAA."""
     if not data_str:
         return ""
     try:
@@ -359,6 +354,13 @@ def formatar_data_br(data_str):
     except Exception:
         pass
     return data_str
+
+
+def formatar_br(valor):
+    try:
+        return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "0,00"
 
 
 def decodificar_boleto(codigo: str):
@@ -391,7 +393,6 @@ def decodificar_boleto(codigo: str):
 
 
 def extrair_dados_pdf_boleto(stream_pdf):
-    """Extrai linha digitável, valor, vencimento e beneficiário do PDF."""
     reader = PdfReader(stream_pdf)
     texto_completo = ""
     for page in reader.pages:
@@ -497,6 +498,22 @@ def extrair_dados_pdf_boleto(stream_pdf):
     return empresa, valor, vencimento
 
 
+import io
+from datetime import datetime, date
+from nicegui import app, ui
+
+# Assumindo que decodificar_boleto, extrair_dados_pdf_boleto, menu_drawer,
+# cabecalho_app e supabase já estejam importados/definidos globalmente no seu projeto.
+
+
+import io
+from datetime import datetime, date
+from nicegui import app, ui
+
+# Assumindo que decodificar_boleto, extrair_dados_pdf_boleto, menu_drawer,
+# cabecalho_app e supabase já estejam importados/definidos globalmente no seu projeto.
+
+
 # ==========================================
 # 2. PÁGINA PRINCIPAL DE BOLETOS
 # ==========================================
@@ -507,104 +524,173 @@ def home_page():
         ui.navigate.to("/login")
         return
 
-    ui.add_head_html(
-        '<script src="https://unpkg.com/@zxing/library@latest"></script>'
-    )
+    # Injeção segura no HEAD (Bibliotecas e Estilos)
+    ui.add_head_html('''
+        <script src="https://unpkg.com/@zxing/library@latest"></script>
+        <style>
+            .scanner-modal-container {
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                width: 100vw; height: 100vh;
+                background-color: #000;
+                z-index: 9999;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+            }
+            .scanner-video-preview {
+                width: 100%; height: 100%;
+                object-fit: cover;
+            }
+            .scanner-overlay {
+                position: absolute;
+                top: 50%; left: 50%;
+                transform: translate(-50%, -50%);
+                width: 85%; max-width: 400px; height: 160px;
+                border: 3px dashed #38bdf8;
+                border-radius: 12px;
+                box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.65);
+                pointer-events: none;
+            }
+            .scanner-line {
+                width: 100%; height: 3px;
+                background: #ef4444;
+                position: absolute; top: 10%;
+                animation: scan-anim 2s infinite linear;
+            }
+            @keyframes scan-anim {
+                0% { top: 10%; }
+                50% { top: 90%; }
+                100% { top: 10%; }
+            }
+        </style>
+    ''')
+
+    # Injeção segura no BODY (Modal e Script de fechamento)
+    ui.add_body_html('''
+        <div id="camera-box" class="scanner-modal-container" style="display: none;">
+            <video id="webcam-preview" class="scanner-video-preview"></video>
+            <div class="scanner-overlay">
+                <div class="scanner-line"></div>
+            </div>
+            
+            <div id="cam-status" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); color: #fff; background: rgba(0,0,0,0.8); padding: 8px 16px; border-radius: 20px; font-size: 16px; font-weight: bold; text-align: center; width: 90%; max-width: 350px;">
+                Aponte para o código de barras
+            </div>
+
+            <button onclick="fecharCamera()" style="position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: #ef4444; color: white; border: none; padding: 14px 28px; border-radius: 50px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer;">
+                ✖ Fechar Câmera
+            </button>
+        </div>
+
+        <script>
+            function fecharCamera() {
+                if (window.codeReader) window.codeReader.reset();
+                const box = document.getElementById("camera-box");
+                if (box) box.style.display = "none";
+            }
+        </script>
+    ''')
 
     drawer = menu_drawer()
     cabecalho_app(drawer)
     user_id = app.storage.user.get("user_id")
 
-    # Busca perfil do usuário para validar contatos
     res_perfil = supabase.table("perfis_usuarios").select("*").eq("id", user_id).execute()
     perfil_usr = res_perfil.data[0] if res_perfil.data else {}
     email_cadastrado = perfil_usr.get("email_notificacao") or perfil_usr.get("email", "")
     whatsapp_cadastrado = perfil_usr.get("whatsapp", "")
 
-    with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-6"):
-        with ui.row().classes("w-full justify-between items-center"):
-            ui.label("📋 Meus Boletos Agendados").classes("text-2xl font-bold text-slate-800")
-            
-            with ui.row().classes("items-center gap-2 bg-purple-50 p-2 rounded-lg border border-purple-200"):
-                ui.icon("notifications", color="purple").classes("text-lg")
-                ui.label(f"Contato: {whatsapp_cadastrado or email_cadastrado or 'Não configurado'}").classes("text-xs text-purple-900 font-medium")
-                ui.button("Alterar Contatos", on_click=lambda: ui.navigate.to("/perfil")).props("flat dense size=sm color=purple")
+    cats_res = supabase.table("dim_categorias").select("*").execute()
+    categorias_list = {c["id"]: c["nome"] for c in (cats_res.data or [])}
 
-        # FORMULÁRIO DE CADASTRO
-        with ui.card().classes("w-full p-5 border border-slate-200 bg-white shadow-sm rounded-xl"):
-            ui.label("➕ Cadastrar Novo Boleto").classes("text-lg font-bold text-slate-700 mb-2")
+    with ui.column().classes("w-full max-w-4xl mx-auto p-3 sm:p-6 gap-6 font-sans pb-32"):
+        
+        # Cabeçalho da seção
+        with ui.card().classes("w-full p-4 bg-purple-50 border border-purple-200 rounded-xl shadow-sm"):
+            with ui.column().classes("w-full sm:flex-row justify-between items-center gap-3"):
+                with ui.row().classes("items-center gap-2"):
+                    ui.icon("receipt_long", size="32px", color="purple-9")
+                    ui.label("Meus Boletos").classes("text-2xl sm:text-3xl font-extrabold text-slate-800")
+                
+                with ui.row().classes("items-center gap-2 bg-white p-2 px-3 rounded-lg border border-purple-200 w-full sm:w-auto justify-between"):
+                    with ui.row().classes("items-center gap-1"):
+                        ui.icon("notifications", color="purple").classes("text-base")
+                        ui.label(f"Contato: {whatsapp_cadastrado or email_cadastrado or 'Não configurado'}").classes("text-sm text-purple-900 font-semibold")
+                    ui.button("Alterar", on_click=lambda: ui.navigate.to("/perfil")).props("flat dense size=md color=purple")
+
+        # Form de Cadastro
+        with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-4"):
+            ui.label("➕ Cadastrar Novo Boleto").classes("text-xl sm:text-2xl font-bold text-slate-800 border-b pb-2 w-full")
 
             modo = (
                 ui.radio(
                     {
                         "manual": "Entrada Manual",
-                        "camera": "Importar PDF / Escanear Código",
+                        "camera": "Importar PDF / Escanear Câmera",
                     },
                     value="manual",
                 )
-                .props("inline")
-                .classes("mb-4 font-medium text-slate-600")
+                .props("inline size=lg")
+                .classes("text-base font-semibold text-slate-700 my-1")
             )
 
-            cats_res = supabase.table("dim_categorias").select("*").execute()
-            categorias_list = {c["id"]: c["nome"] for c in (cats_res.data or [])}
-
-            with ui.row().classes("w-full gap-4 items-center"):
+            with ui.column().classes("w-full gap-4"):
                 input_empresa = (
-                    ui.input("Empresa / Descrição")
-                    .props("outlined dense")
-                    .classes("flex-1")
+                    ui.input("Empresa / Nome do Boleto", placeholder="Ex: Conta de Luz, Internet...")
+                    .props("outlined size=lg bg-slate-50")
+                    .classes("w-full text-lg")
                 )
-                input_valor = (
-                    ui.number("Valor (R$)", format="%.2f")
-                    .props("outlined dense")
-                    .classes("w-36")
-                )
-                input_vencimento = (
-                    ui.input("Vencimento")
-                    .props("type=date outlined dense")
-                    .classes("w-40")
-                )
-
-            with ui.row().classes("w-full gap-4 items-center mt-2"):
-                select_categoria = (
-                    ui.select(categorias_list, label="Categoria")
-                    .props("outlined dense")
-                    .classes("flex-1")
-                )
-                select_status = (
-                    ui.select(
-                        ["PENDENTE", "PAGO", "ATRASADO", "CANCELADO"],
-                        value="PENDENTE",
-                        label="Status",
+                
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-4"):
+                    input_valor = (
+                        ui.number("Valor (R$)", format="%.2f", placeholder="0,00")
+                        .props("outlined size=lg bg-slate-50 input-class=text-lg")
+                        .classes("w-full")
                     )
-                    .props("outlined dense")
-                    .classes("w-40")
-                )
+                    input_vencimento = (
+                        ui.input("Data de Vencimento")
+                        .props("type=date outlined size=lg bg-slate-50")
+                        .classes("w-full")
+                    )
 
-            # LEMBRETES
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-4"):
+                    select_categoria = (
+                        ui.select(categorias_list, label="Categoria")
+                        .props("outlined size=lg bg-slate-50")
+                        .classes("w-full")
+                    )
+                    select_status = (
+                        ui.select(
+                            ["PENDENTE", "PAGO", "ATRASADO", "CANCELADO"],
+                            value="PENDENTE",
+                            label="Status Inicial",
+                        )
+                        .props("outlined size=lg bg-slate-50")
+                        .classes("w-full")
+                    )
+
             check_lembrete = ui.checkbox(
-                "Definir lembrete de vencimento"
-            ).classes("mt-4 text-slate-700 font-medium")
+                "🔔 Desejo receber um lembrete antes do vencimento"
+            ).classes("mt-2 text-base sm:text-lg text-slate-800 font-bold")
 
             container_lembrete = ui.column().classes(
-                "w-full p-4 bg-purple-50/50 border border-purple-100 rounded-lg mt-2 gap-3"
+                "w-full p-4 bg-purple-50 border-2 border-purple-200 rounded-xl gap-4"
             )
             container_lembrete.bind_visibility_from(check_lembrete, "value")
 
             with container_lembrete:
-                ui.label("🔔 Configurações do Alerta").classes(
-                    "text-xs font-bold text-purple-700 uppercase tracking-wider"
-                )
-                with ui.row().classes("w-full gap-4 items-center"):
+                ui.label("Configuração do Lembrete").classes("text-sm font-bold text-purple-800 uppercase tracking-wide")
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-3 gap-3"):
                     select_canal = (
                         ui.select(
                             ["SMS", "WhatsApp", "E-mail", "Todos"],
                             value="WhatsApp",
-                            label="Canal de Notificação",
+                            label="Canal",
                         )
-                        .props("outlined dense bg-white")
-                        .classes("flex-1")
+                        .props("outlined bg-white size=lg")
+                        .classes("w-full")
                     )
                     select_antecedencia = (
                         ui.select(
@@ -613,22 +699,20 @@ def home_page():
                                 1: "1 dia antes",
                                 2: "2 dias antes",
                                 3: "3 dias antes",
-                                4: "4 dias antes",
                                 5: "5 dias antes",
                             },
                             value=1,
-                            label="Antecedência",
+                            label="Aviso",
                         )
-                        .props("outlined dense bg-white")
-                        .classes("flex-1")
+                        .props("outlined bg-white size=lg")
+                        .classes("w-full")
                     )
                     input_horario = (
                         ui.input("Horário", value="09:00")
-                        .props("type=time outlined dense bg-white")
-                        .classes("w-32")
+                        .props("type=time outlined bg-white size=lg")
+                        .classes("w-full")
                     )
 
-            # CÂMERA E UPLOAD DE PDF
             def aplicar_dados_boleto(codigo_raw):
                 val, venc, limpo = decodificar_boleto(codigo_raw)
                 if val is not None:
@@ -637,23 +721,24 @@ def home_page():
                     input_vencimento.value = venc
 
                 if val or venc:
-                    ui.notify("Dados extraídos com sucesso!", color="positive")
+                    ui.notify("Dados extraídos com sucesso!", color="positive", size="lg")
                 else:
                     ui.notify(
-                        f"Código ({limpo}) lido, mas não possui formato padrão.",
-                        color="warning",
+                        f"Código lido ({limpo}), verifique os valores.",
+                        color="warning", size="lg"
                     )
 
             def processar_codigo_escaneado(e):
-                aplicar_dados_boleto(e.args.get("codigo", ""))
+                codigo = e.args.get("codigo", "") if isinstance(e.args, dict) else ""
+                aplicar_dados_boleto(codigo)
 
             ui.on("boleto_escaneado", processar_codigo_escaneado)
 
             container_camera = ui.column().classes(
-                "w-full mb-4 gap-4 p-4 bg-slate-50 border border-slate-200 rounded-lg"
+                "w-full p-4 bg-slate-100 border border-slate-300 rounded-xl gap-4"
             )
             with container_camera:
-                ui.label("📄 Upload do PDF do Boleto").classes("font-bold text-slate-700")
+                ui.label("📄 Opção 1: Anexar PDF do Boleto").classes("font-bold text-slate-800 text-base")
 
                 async def handle_upload(e):
                     try:
@@ -679,102 +764,78 @@ def home_page():
                             preencheu = True
 
                         if preencheu:
-                            ui.notify("PDF lido com sucesso!", color="positive")
+                            ui.notify("Dados lidos do PDF!", color="positive", size="lg")
                         else:
-                            ui.notify("Não foi possível extrair dados automáticos deste PDF.", color="warning")
+                            ui.notify("Não foi possível ler os dados do PDF automaticamente.", color="warning")
 
                     except Exception as err:
                         ui.notify(f"Erro ao processar PDF: {err}", color="negative")
 
-                ui.upload(on_upload=handle_upload, auto_upload=True).props("accept=.pdf flat").classes("w-full bg-white border border-dashed border-slate-300 p-2")
+                ui.upload(on_upload=handle_upload, auto_upload=True).props("accept=.pdf flat").classes("w-full bg-white border-2 border-dashed border-slate-300 p-2 rounded-lg")
+                
                 ui.separator()
 
-                with ui.row().classes("w-full gap-2 items-center"):
-                    input_linha = ui.input("Cole a Linha Digitável", placeholder="Ex: 23793...").props("outlined dense").classes("flex-1 bg-white")
-                    ui.button("Processar", on_click=lambda: aplicar_dados_boleto(input_linha.value)).classes("bg-purple-700 text-white font-bold")
+                ui.label("📷 Opção 2: Escanear com a Câmera Traseira").classes("font-bold text-slate-800 text-base")
 
-                ui.separator()
+                ui.button("📷 ABRIR CÂMERA EM TELA CHEIA", on_click=lambda: ui.run_javascript("""
+                    (async () => {
+                        const box = document.getElementById("camera-box");
+                        const status = document.getElementById("cam-status");
+                        box.style.display = "flex";
+                        status.innerHTML = "Iniciando câmera traseira...";
 
-                ui.html("""
-                    <div id="camera-box" style="display: none; position: relative; width: 100%; max-width: 480px; margin: 0 auto; overflow: hidden; border-radius: 12px; border: 2px solid #7e22ce; background-color: #000;">
-                        <video id="webcam-preview" style="width: 100%; height: 260px; object-fit: cover;"></video>
-                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 85%; height: 90px; border: 2px dashed #38bdf8; border-radius: 8px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.55); pointer-events: none;">
-                            <div style="width: 100%; height: 2px; background: red; position: absolute; top: 50%; transform: translateY(-50%); animation: scan 2s infinite linear;"></div>
-                        </div>
-                        <style>
-                            @keyframes scan { 0% { top: 10%; } 50% { top: 90%; } 100% { top: 10%; } }
-                        </style>
-                        <div id="cam-status" style="position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; color: #fff; background: rgba(0,0,0,0.7); padding: 4px; font-size: 13px; font-weight: bold;">
-                            Alinhe o código dentro do retângulo
-                        </div>
-                    </div>
-                """)
-
-                with ui.row().classes("w-full justify-center gap-2 mt-2"):
-                    ui.button("📷 Abrir Câmera", on_click=lambda: ui.run_javascript("""
-                        (async () => {
-                            const box = document.getElementById("camera-box");
-                            const status = document.getElementById("cam-status");
-                            box.style.display = "block";
-                            status.innerHTML = "Iniciando Câmera...";
-                            if (!window.codeReader) window.codeReader = new ZXing.BrowserMultiFormatReader();
-                            try {
-                                const videoDevices = await window.codeReader.listVideoInputDevices();
-                                if (videoDevices.length === 0) return alert("Câmera não encontrada.");
-                                let selectedId = videoDevices[0].deviceId;
-                                for (let dev of videoDevices) {
-                                    if (dev.label.toLowerCase().includes('back') || dev.label.toLowerCase().includes('traseira')) {
-                                        selectedId = dev.deviceId;
-                                        break;
-                                    }
+                        if (!window.codeReader) window.codeReader = new ZXing.BrowserMultiFormatReader();
+                        try {
+                            const constraints = { video: { facingMode: { exact: "environment" } } };
+                            
+                            window.codeReader.decodeFromConstraints(constraints, 'webcam-preview', (result, err) => {
+                                if (result) {
+                                    status.innerHTML = "✅ Código Lido!";
+                                    fecharCamera();
+                                    emitEvent('boleto_escaneado', { codigo: result.text });
                                 }
-                                status.innerHTML = "Aproxime devagar...";
-                                window.codeReader.decodeFromVideoDevice(selectedId, 'webcam-preview', (result, err) => {
+                            }).catch(err => {
+                                window.codeReader.decodeFromVideoDevice(null, 'webcam-preview', (result) => {
                                     if (result) {
-                                        status.innerHTML = "✅ Sucesso!";
-                                        window.codeReader.reset();
-                                        box.style.display = "none";
+                                        fecharCamera();
                                         emitEvent('boleto_escaneado', { codigo: result.text });
                                     }
                                 });
-                            } catch (err) { console.error(err); }
-                        })();
-                    """)).classes("bg-purple-700 text-white font-bold")
+                            });
+                        } catch (err) { 
+                            status.innerHTML = "Erro ao acessar a câmera"; 
+                        }
+                    })();
+                """)).classes("w-full bg-purple-700 hover:bg-purple-800 text-white font-bold py-3 text-lg rounded-xl shadow-md")
 
-                    ui.button("🛑 Fechar Câmera", on_click=lambda: ui.run_javascript("""
-                        if (window.codeReader) window.codeReader.reset();
-                        document.getElementById("camera-box").style.display = "none";
-                    """)).classes("bg-gray-600 text-white font-bold")
+                ui.separator()
+
+                ui.label("✏️ Opção 3: Digitar Código").classes("font-bold text-slate-800 text-base")
+                with ui.column().classes("w-full gap-2"):
+                    input_linha = ui.input("Cole ou digite a linha digitável", placeholder="00000.00000...").props("outlined bg-white size=lg").classes("w-full")
+                    ui.button("Processar Linha", on_click=lambda: aplicar_dados_boleto(input_linha.value)).classes("w-full bg-slate-700 text-white font-bold py-2 rounded-lg")
 
             container_camera.bind_visibility_from(modo, "value", backward=lambda v: v == "camera")
 
-            modo.on_value_change(lambda e: ui.run_javascript("""
-                if (window.codeReader) window.codeReader.reset();
-                document.getElementById("camera-box").style.display = "none";
-            """) if e.value == "manual" else None)
+            def limpar_formulario():
+                input_empresa.value = ""
+                input_valor.value = None
+                input_vencimento.value = None
+                select_categoria.value = None
+                select_status.value = "PENDENTE"
+                check_lembrete.value = False
+                select_canal.value = "WhatsApp"
+                select_antecedencia.value = 1
+                input_horario.value = "09:00"
+                input_linha.value = ""
 
-            # SALVAR NOVO BOLETO
             def salvar_boleto():
                 empresa_val = input_empresa.value.strip() if input_empresa.value else ""
                 valor_val = float(input_valor.value) if input_valor.value else 0.0
                 vencimento_val = input_vencimento.value
 
                 if not empresa_val or not valor_val or not vencimento_val:
-                    ui.notify("Preencha a Empresa, Valor e Vencimento!", color="warning")
-                    return
-
-                # Verifica duplicados
-                dup_res = (
-                    supabase.table("boletos")
-                    .select("id")
-                    .eq("user_id", user_id)
-                    .ilike("empresa", empresa_val)
-                    .eq("valor", valor_val)
-                    .eq("data_vencimento", vencimento_val)
-                    .execute()
-                )
-                if dup_res.data:
-                    ui.notify("⚠️ Já existe um boleto cadastrado com a mesma empresa, valor e vencimento!", color="warning")
+                    ui.notify("Por favor, preencha Empresa, Valor e Vencimento!", color="warning", size="lg")
                     return
 
                 payload = {
@@ -792,409 +853,292 @@ def home_page():
                     payload["antecedencia_dias"] = select_antecedencia.value
                     payload["horario_lembrete"] = input_horario.value
 
-                tentativas = 0
-                while tentativas < 5:
-                    try:
-                        supabase.table("boletos").insert(payload).execute()
-                        ui.notify("Boleto cadastrado com sucesso!", color="positive")
-                        ui.navigate.reload()
-                        break
-                    except Exception as err:
-                        err_str = str(err)
-                        tentativas += 1
-                        if "tem_lembrete" in err_str:
-                            payload.pop("tem_lembrete", None)
-                        elif "antecedencia_dias" in err_str:
-                            payload.pop("antecedencia_dias", None)
-                            payload["dias_antecedencia"] = select_antecedencia.value
-                        elif "dias_antecedencia" in err_str:
-                            payload.pop("dias_antecedencia", None)
-                        elif "canal_lembrete" in err_str:
-                            payload.pop("canal_lembrete", None)
-                        elif "horario_lembrete" in err_str:
-                            payload.pop("horario_lembrete", None)
-                        else:
-                            ui.notify(f"Erro ao salvar boleto: {err}", color="negative")
-                            break
+                try:
+                    supabase.table("boletos").insert(payload).execute()
+                    ui.notify("Boleto cadastrado com sucesso!", color="positive", size="lg")
+                    limpar_formulario()
+                    renderizar_boletos_filtrados()
+                except Exception as err:
+                    ui.notify(f"Erro ao salvar boleto: {err}", color="negative", size="lg")
 
-            ui.button("CONFIRMAR E SALVAR BOLETO", on_click=salvar_boleto).classes(
-                "bg-green-600 hover:bg-green-700 text-white font-bold mt-4 w-full py-3 rounded-lg shadow"
+            ui.button("💾 CONFIRMAR E SALVAR BOLETO", on_click=salvar_boleto).classes(
+                "bg-green-600 hover:bg-green-700 text-white font-extrabold text-lg mt-2 w-full py-4 rounded-xl shadow-lg"
             )
 
         # ==========================================
-        # TABELA DE BOLETOS COM FILTROS E AGRUPAMENTO
+        # 3. LISTA E FILTROS DE BOLETOS
         # ==========================================
+        
+        ui.label("📋 Meus Boletos Cadastrados").classes("text-xl sm:text-2xl font-bold text-slate-800 mt-4")
 
-        # BARRA DE FILTROS (Empresa e Categoria)
-        with ui.row().classes("w-full gap-4 items-center bg-slate-100 p-4 rounded-xl border border-slate-200 mb-2"):
-            ui.icon("filter_alt", color="purple").classes("text-xl")
-            ui.label("Filtros:").classes("font-bold text-slate-700")
-
-            filtro_empresa = (
-                ui.input("Buscar por Empresa", placeholder="Digite o nome...")
-                .props("outlined dense clearable bg-white")
-                .classes("flex-1")
-            )
-
-            opcoes_cat_filtro = {"TODAS": "Todas as Categorias"}
-            opcoes_cat_filtro.update(categorias_list)
-
-            filtro_categoria = (
-                ui.select(opcoes_cat_filtro, value="TODAS", label="Filtrar Categoria")
-                .props("outlined dense bg-white")
-                .classes("w-56")
-            )
-
-        # BUSCA DADOS NO BANCO
-        res = (
-            supabase.table("boletos")
-            .select("*, dim_categorias(nome)")
-            .eq("user_id", user_id)
-            .order("data_vencimento")
-            .execute()
-        )
-        boletos_todos = res.data or []
-
-        def montar_rows_filtrados():
-            emp_busca = (filtro_empresa.value or "").strip().lower()
-            cat_busca = filtro_categoria.value
-
-            rows_filtrados = []
-            for b in boletos_todos:
-                nome_empresa = b.get("empresa", "")
-                cat_id = b.get("categoria_id")
-                cat_nome = b["dim_categorias"]["nome"] if b.get("dim_categorias") else "Geral"
-
-                # Filtro por Empresa
-                if emp_busca and emp_busca not in nome_empresa.lower():
-                    continue
-
-                # Filtro por Categoria
-                if cat_busca != "TODAS" and cat_id != cat_busca:
-                    continue
-
-                # Lembretes
-                if b.get("tem_lembrete"):
-                    antecedencia = b.get("antecedencia_dias") if b.get("antecedencia_dias") is not None else b.get("dias_antecedencia", 0)
-                    ant_str = "No dia" if antecedencia == 0 else f"{antecedencia}d antes"
-                    canal_str = b.get("canal_lembrete") or "WhatsApp"
-                    horario_str = b.get("horario_lembrete") or "09:00"
-                    lembrete_info = f"{canal_str} • {ant_str} às {horario_str}"
-                else:
-                    lembrete_info = "Desativado"
-
-                rows_filtrados.append({
-                    "id": b["id"],
-                    "empresa": nome_empresa,
-                    "valor": f"R$ {formatar_br(b['valor'])}",
-                    "vencimento": formatar_data_br(b["data_vencimento"]),
-                    "categoria": cat_nome,
-                    "lembrete": lembrete_info,
-                    "tem_lembrete": b.get("tem_lembrete", False),
-                    "status": b["status"],
-                })
-            return rows_filtrados
-
-        cols = [
-            {"name": "categoria", "label": "Categoria", "field": "categoria", "align": "left", "sortable": True},
-            {"name": "empresa", "label": "Empresa", "field": "empresa", "align": "left", "sortable": True},
-            {"name": "vencimento", "label": "Vencimento", "field": "vencimento", "align": "center", "sortable": True},
-            {"name": "valor", "label": "Valor", "field": "valor", "align": "right", "sortable": True},
-            {"name": "lembrete", "label": "Lembrete / Alerta", "field": "lembrete", "align": "center"},
-            {"name": "status", "label": "Status Atual", "field": "status", "align": "center", "sortable": True},
-            {"name": "acoes", "label": "Ações", "field": "acoes", "align": "center"},
-        ]
-
-        tabela = ui.table(
-            columns=cols, 
-            rows=montar_rows_filtrados(), 
-            row_key="id"
-        ).classes("w-full bg-white shadow-sm border border-slate-200 rounded-xl overflow-hidden")
-
-        def aplicar_filtros():
-            tabela.rows = montar_rows_filtrados()
-            tabela.update()
-
-        filtro_empresa.on_value_change(aplicar_filtros)
-        filtro_categoria.on_value_change(aplicar_filtros)
-
-        # SLOTS DE ESTILIZAÇÃO DA TABELA
-        tabela.add_slot(
-            "body-cell-categoria",
-            """
-            <q-td :props="props">
-                <q-chip dense outline color="purple" icon="folder">
-                    {{ props.row.categoria }}
-                </q-chip>
-            </q-td>
-            """,
-        )
-
-        tabela.add_slot(
-            "body-cell-lembrete",
-            """
-            <q-td :props="props">
-                <template v-if="props.row.tem_lembrete">
-                    <q-chip 
-                        dense 
-                        class="bg-purple-100 text-purple-900 font-bold" 
-                        icon="notifications_active"
-                    >
-                        {{ props.row.lembrete }}
-                    </q-chip>
-                </template>
-                <template v-else>
-                    <span class="text-xs text-slate-400 italic">Desativado</span>
-                </template>
-            </q-td>
-            """,
-        )
-
-        tabela.add_slot(
-            "body-cell-status",
-            """
-            <q-td :props="props">
-                <q-chip 
-                    dense 
-                    square
-                    :color="props.row.status === 'PAGO' ? 'positive' : props.row.status === 'ATRASADO' ? 'negative' : props.row.status === 'CANCELADO' ? 'grey-7' : 'warning'"
-                    text-color="white"
-                    :icon="props.row.status === 'PAGO' ? 'check_circle' : props.row.status === 'ATRASADO' ? 'warning' : props.row.status === 'CANCELADO' ? 'block' : 'schedule'"
-                >
-                    {{ props.row.status }}
-                </q-chip>
-            </q-td>
-            """,
-        )
-
-        # COLUNA DE AÇÕES COM EDIÇÃO COMPLETA
-        tabela.add_slot(
-            "body-cell-acoes",
-            """
-            <q-td :props="props" class="q-gutter-x-xs">
-                <q-btn 
-                    icon="edit" 
-                    color="primary" 
-                    flat 
-                    round 
-                    dense 
-                    size="sm"
-                    @click="$parent.$emit('abrir_edicao_boleto', props.row)"
-                >
-                    <q-tooltip>Editar Dados Completos</q-tooltip>
-                </q-btn>
-
-                <q-btn-dropdown size="sm" color="purple" label="Status" dense flat icon="swap_horiz">
-                    <q-list>
-                        <q-item clickable v-close-popup @click="$parent.$emit('atualizar_status', {id: props.row.id, status: 'PENDENTE'})">
-                            <q-item-section avatar><q-icon name="schedule" color="warning" /></q-item-section>
-                            <q-item-section><q-item-label>PENDENTE</q-item-label></q-item-section>
-                        </q-item>
-                        <q-item clickable v-close-popup @click="$parent.$emit('atualizar_status', {id: props.row.id, status: 'PAGO'})">
-                            <q-item-section avatar><q-icon name="check_circle" color="positive" /></q-item-section>
-                            <q-item-section><q-item-label>PAGO</q-item-label></q-item-section>
-                        </q-item>
-                        <q-item clickable v-close-popup @click="$parent.$emit('atualizar_status', {id: props.row.id, status: 'ATRASADO'})">
-                            <q-item-section avatar><q-icon name="warning" color="negative" /></q-item-section>
-                            <q-item-section><q-item-label>ATRASADO</q-item-label></q-item-section>
-                        </q-item>
-                        <q-item clickable v-close-popup @click="$parent.$emit('atualizar_status', {id: props.row.id, status: 'CANCELADO'})">
-                            <q-item-section avatar><q-icon name="block" color="grey" /></q-item-section>
-                            <q-item-section><q-item-label>CANCELADO</q-item-label></q-item-section>
-                        </q-item>
-                    </q-list>
-                </q-btn-dropdown>
-
-                <q-btn 
-                    icon="delete" 
-                    color="negative" 
-                    flat 
-                    round 
-                    dense 
-                    size="sm"
-                    @click="$parent.$emit('deletar_boleto', {id: props.row.id})"
-                >
-                    <q-tooltip>Excluir Boleto</q-tooltip>
-                </q-btn>
-            </q-td>
-            """,
-        )
-
-        # MODAL DE EDIÇÃO COMPLETA (EMPRESA, VALOR, VENCIMENTO E ALERTAS)
-        def abrir_modal_edicao(e):
-            row_data = e.args
-            boleto_id = row_data.get("id")
-
-            res_b = supabase.table("boletos").select("*").eq("id", boleto_id).execute()
-            if not res_b.data:
-                ui.notify("Boleto não encontrado.", color="negative")
-                return
-            
-            b_atual = res_b.data[0]
-
-            with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl p-6 rounded-xl"):
-                ui.label("✏️ Editar Boleto").classes("text-xl font-bold text-slate-800 mb-2")
-
-                edit_empresa = ui.input("Empresa / Descrição", value=b_atual.get("empresa", "")).props("outlined dense").classes("w-full")
+        # Filtros Adicionais em Sanfona
+        with ui.expansion("🔍 Filtros Avançados de Pesquisa", icon="filter_alt").classes("w-full bg-slate-100 border border-slate-300 rounded-xl font-bold text-slate-700 text-base"):
+            with ui.column().classes("w-full p-3 gap-3 bg-white rounded-b-xl"):
+                input_busca = ui.input("Empresa/Descrição", placeholder="Buscar por nome...").props("outlined dense bg-white").classes("w-full")
                 
-                with ui.row().classes("w-full gap-4 items-center"):
-                    edit_valor = ui.number("Valor (R$)", value=float(b_atual.get("valor", 0.0)), format="%.2f").props("outlined dense").classes("flex-1")
-                    edit_vencimento = ui.input("Vencimento", value=b_atual.get("data_vencimento", "")).props("type=date outlined dense").classes("flex-1")
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-3"):
+                    opcoes_cat = {"TODAS": "Todas as Categorias"}
+                    opcoes_cat.update(categorias_list)
+                    select_filtro_cat = ui.select(opcoes_cat, value="TODAS", label="Categoria").props("outlined dense").classes("w-full")
+                    
+                    select_filtro_status = ui.select(
+                        {"TODOS": "Todos os Status", "PENDENTE": "PENDENTE", "PAGO": "PAGO", "ATRASADO": "ATRASADO", "CANCELADO": "CANCELADO"},
+                        value="TODOS", label="Filtrar por Status no Filtro"
+                    ).props("outlined dense").classes("w-full")
 
-                with ui.row().classes("w-full gap-4 items-center"):
-                    edit_categoria = ui.select(categorias_list, value=b_atual.get("categoria_id"), label="Categoria").props("outlined dense").classes("flex-1")
-                    edit_status = ui.select(["PENDENTE", "PAGO", "ATRASADO", "CANCELADO"], value=b_atual.get("status", "PENDENTE"), label="Status").props("outlined dense").classes("flex-1")
+                ui.label("Período de Vencimento:").classes("text-sm font-semibold text-slate-600 mt-1")
+                with ui.grid().classes("w-full grid-cols-2 gap-3"):
+                    dt_inicio = ui.input("De").props("type=date outlined dense").classes("w-full")
+                    dt_fim = ui.input("Até").props("type=date outlined dense").classes("w-full")
 
-                edit_check_lembrete = ui.checkbox("Definir lembrete de vencimento", value=b_atual.get("tem_lembrete", False)).classes("mt-2 text-slate-700 font-medium")
+                ui.label("Faixa de Valor (R$):").classes("text-sm font-semibold text-slate-600 mt-1")
+                with ui.grid().classes("w-full grid-cols-2 gap-3"):
+                    val_min = ui.number("Valor Mínimo").props("outlined dense").classes("w-full")
+                    val_max = ui.number("Valor Máximo").props("outlined dense").classes("w-full")
 
-                container_edit_lembrete = ui.column().classes("w-full p-4 bg-purple-50/50 border border-purple-100 rounded-lg gap-3 mt-2")
-                container_edit_lembrete.bind_visibility_from(edit_check_lembrete, "value")
+        # Vincular atualização dos filtros à renderização
+        for element in [input_busca, select_filtro_cat, select_filtro_status, dt_inicio, dt_fim, val_min, val_max]:
+            element.on("update:model-value", lambda: renderizar_boletos_filtrados())
 
-                with container_edit_lembrete:
-                    ui.label("🔔 Configurações do Alerta").classes("text-xs font-bold text-purple-700 uppercase tracking-wider")
-                    with ui.row().classes("w-full gap-4 items-center"):
-                        edit_canal = ui.select(
-                            ["SMS", "WhatsApp", "E-mail", "Todos"], 
-                            value=b_atual.get("canal_lembrete") or "WhatsApp", 
-                            label="Canal"
-                        ).props("outlined dense bg-white").classes("flex-1")
-                        
-                        antecedencia_atual = b_atual.get("antecedencia_dias") if b_atual.get("antecedencia_dias") is not None else b_atual.get("dias_antecedencia", 1)
-                        edit_antecedencia = ui.select(
-                            {0: "No dia do vencimento", 1: "1 dia antes", 2: "2 dias antes", 3: "3 dias antes", 4: "4 dias antes", 5: "5 dias antes"},
-                            value=antecedencia_atual,
-                            label="Antecedência"
-                        ).props("outlined dense bg-white").classes("flex-1")
-                        
-                        edit_horario = ui.input("Horário", value=b_atual.get("horario_lembrete") or "09:00").props("type=time outlined dense bg-white").classes("w-32")
+        # ==========================================
+        # SEPARAÇÃO POR ABAS (STATUS)
+        # ==========================================
+        with ui.tabs().classes("w-full text-purple-900 font-bold") as tabs:
+            tab_pendentes = ui.tab("pendentes", label="A Vencer")
+            tab_atrasados = ui.tab("atrasados", label="Atrasados")
+            tab_pagos = ui.tab("pagos", label="Pagos")
+            tab_todos = ui.tab("todos", label="Todos")
 
-                def salvar_alteracoes():
-                    if not edit_empresa.value or not edit_valor.value or not edit_vencimento.value:
-                        ui.notify("Preencha Empresa, Valor e Vencimento!", color="warning")
-                        return
+        container_boletos = ui.column().classes("w-full gap-3 mt-2")
 
+        # ==========================================
+        # MODAL DE EDIÇÃO COMPLETA DO BOLETO
+        # ==========================================
+        def abrir_modal_edicao(b):
+            dialog = ui.dialog()
+            with dialog, ui.card().classes("w-full max-w-lg p-5 gap-4 bg-white rounded-2xl"):
+                ui.label("✏️ Editar Boleto").classes("text-xl font-bold text-slate-800 border-b pb-2 w-full")
+
+                edit_empresa = ui.input("Empresa / Nome", value=b.get("empresa", "")).props("outlined bg-slate-50").classes("w-full")
+                
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-3"):
+                    edit_valor = ui.number("Valor (R$)", value=float(b.get("valor", 0)), format="%.2f").props("outlined bg-slate-50").classes("w-full")
+                    edit_vencimento = ui.input("Vencimento", value=b.get("data_vencimento", "")).props("type=date outlined bg-slate-50").classes("w-full")
+
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-3"):
+                    edit_categoria = ui.select(categorias_list, label="Categoria", value=b.get("categoria_id")).props("outlined bg-slate-50").classes("w-full")
+                    edit_status = ui.select(["PENDENTE", "PAGO", "ATRASADO", "CANCELADO"], label="Status", value=b.get("status", "PENDENTE")).props("outlined bg-slate-50").classes("w-full")
+
+                ui.separator()
+
+                edit_check_lembrete = ui.checkbox("🔔 Lembrete configurado", value=bool(b.get("tem_lembrete"))).classes("text-base font-bold text-slate-800")
+                
+                box_edit_lembrete = ui.column().classes("w-full p-3 bg-purple-50 border border-purple-200 rounded-xl gap-3")
+                box_edit_lembrete.bind_visibility_from(edit_check_lembrete, "value")
+
+                with box_edit_lembrete:
+                    edit_select_canal = ui.select(["SMS", "WhatsApp", "E-mail", "Todos"], label="Canal", value=b.get("canal_lembrete", "WhatsApp")).props("outlined bg-white").classes("w-full")
+                    
+                    antecedencia_map = {0: "No dia do vencimento", 1: "1 dia antes", 2: "2 dias antes", 3: "3 dias antes", 5: "5 dias antes"}
+                    val_antecedencia = b.get("antecedencia_dias", 1)
+                    edit_select_antecedencia = ui.select(antecedencia_map, label="Aviso", value=val_antecedencia if val_antecedencia in antecedencia_map else 1).props("outlined bg-white").classes("w-full")
+                    
+                    edit_input_horario = ui.input("Horário", value=b.get("horario_lembrete", "09:00")).props("type=time outlined bg-white").classes("w-full")
+
+                def salvar_edicao():
                     payload_update = {
-                        "empresa": edit_empresa.value.strip(),
-                        "valor": float(edit_valor.value),
+                        "empresa": edit_empresa.value.strip() if edit_empresa.value else "",
+                        "valor": float(edit_valor.value) if edit_valor.value else 0.0,
                         "data_vencimento": edit_vencimento.value,
-                        "categoria_id": edit_categoria.value,
+                        "categoria_id": edit_categoria.value if edit_categoria.value else None,
                         "status": edit_status.value,
                         "tem_lembrete": edit_check_lembrete.value,
                     }
 
                     if edit_check_lembrete.value:
-                        payload_update["canal_lembrete"] = edit_canal.value
-                        payload_update["antecedencia_dias"] = edit_antecedencia.value
-                        payload_update["horario_lembrete"] = edit_horario.value
+                        payload_update["canal_lembrete"] = edit_select_canal.value
+                        payload_update["antecedencia_dias"] = edit_select_antecedencia.value
+                        payload_update["horario_lembrete"] = edit_input_horario.value
+                    else:
+                        payload_update["canal_lembrete"] = None
+                        payload_update["antecedencia_dias"] = None
+                        payload_update["horario_lembrete"] = None
 
                     try:
-                        supabase.table("boletos").update(payload_update).eq("id", boleto_id).execute()
+                        supabase.table("boletos").update(payload_update).eq("id", b["id"]).execute()
                         ui.notify("Boleto atualizado com sucesso!", color="positive")
                         dialog.close()
-                        ui.navigate.reload()
+                        renderizar_boletos_filtrados()
                     except Exception as err:
-                        if "antecedencia_dias" in str(err):
-                            payload_update.pop("antecedencia_dias", None)
-                            payload_update["dias_antecedencia"] = edit_antecedencia.value
-                            try:
-                                supabase.table("boletos").update(payload_update).eq("id", boleto_id).execute()
-                                ui.notify("Boleto atualizado com sucesso!", color="positive")
-                                dialog.close()
-                                ui.navigate.reload()
-                                return
-                            except Exception as inner_err:
-                                ui.notify(f"Erro ao atualizar: {inner_err}", color="negative")
-                        else:
-                            ui.notify(f"Erro ao atualizar boleto: {err}", color="negative")
+                        ui.notify(f"Erro ao atualizar: {err}", color="negative")
 
-                with ui.row().classes("w-full justify-end gap-2 mt-4"):
+                with ui.row().classes("w-full justify-end gap-3 mt-2"):
                     ui.button("Cancelar", on_click=dialog.close).props("flat color=grey")
-                    ui.button("SALVAR ALTERAÇÕES", on_click=salvar_alteracoes).classes("bg-purple-700 text-white font-bold px-4 py-2 rounded-lg")
+                    ui.button("Salvar Alterações", on_click=salvar_edicao).classes("bg-purple-700 text-white font-bold px-4 py-2 rounded-lg")
 
             dialog.open()
 
-        def atualizar_status_boleto(e):
-            boleto_id = e.args.get("id")
-            novo_status = e.args.get("status")
-            if boleto_id and novo_status:
-                supabase.table("boletos").update({"status": novo_status}).eq("id", boleto_id).execute()
+        def alternar_status_pago(b):
+            novo_status = "PENDENTE" if b.get("status") == "PAGO" else "PAGO"
+            try:
+                supabase.table("boletos").update({"status": novo_status}).eq("id", b["id"]).execute()
                 ui.notify(f"Status alterado para {novo_status}!", color="positive")
-                ui.navigate.reload()
+                renderizar_boletos_filtrados()
+            except Exception as err:
+                ui.notify(f"Erro ao alterar status: {err}", color="negative")
 
-        def deletar_boleto(e):
-            boleto_id = e.args.get("id")
-            if boleto_id:
-                try:
-                    supabase.table("boletos").delete().eq("id", boleto_id).execute()
-                    ui.notify("Boleto excluído com sucesso!", color="positive")
-                    ui.navigate.reload()
-                except Exception as err:
-                    ui.notify(f"Erro ao excluir boleto: {err}", color="negative")
+        def deletar_boleto(b_id):
+            try:
+                supabase.table("boletos").delete().eq("id", b_id).execute()
+                ui.notify("Boleto excluído com sucesso!", color="info")
+                renderizar_boletos_filtrados()
+            except Exception as err:
+                ui.notify(f"Erro ao excluir: {err}", color="negative")
 
-        tabela.on("abrir_edicao_boleto", abrir_modal_edicao)
-        tabela.on("atualizar_status", atualizar_status_boleto)
-        tabela.on("deletar_boleto", deletar_boleto)
+        # ==========================================
+        # RENDERIZAÇÃO DE CARDS POR STATUS/ABA
+        # ==========================================
+        def renderizar_boletos_filtrados():
+            container_boletos.clear()
+            
+            res = supabase.table("boletos").select("*").eq("user_id", user_id).order("data_vencimento", desc=False).execute()
+            boletos_dados = res.data or []
 
+            hoje = datetime.now().date()
 
-# ==========================================
-# 3. PÁGINA DE PERFIL / CONFIGURAÇÃO DE CONTATO
-# ==========================================
+            boletos_filtrados = []
+            
+            cnt_pendentes = 0
+            cnt_atrasados = 0
+            cnt_pagos = 0
+            cnt_todos = 0
 
-@ui.page("/perfil")
-def perfil_page():
-    if not app.storage.user.get("user_id"):
-        ui.navigate.to("/login")
-        return
+            for b in boletos_dados:
+                dt_venc = None
+                if b.get("data_vencimento"):
+                    try:
+                        dt_venc = datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
 
-    drawer = menu_drawer()
-    cabecalho_app(drawer)
-    user_id = app.storage.user.get("user_id")
+                status_atual = b.get("status", "PENDENTE")
+                if status_atual == "PENDENTE" and dt_venc and dt_venc < hoje:
+                    status_atual = "ATRASADO"
 
-    res = (
-        supabase.table("perfis_usuarios")
-        .select("*")
-        .eq("id", user_id)
-        .execute()
-    )
-    perfil = res.data[0] if res.data else {}
+                # Aplicação dos Filtros em Sanfona
+                if input_busca.value and input_busca.value.lower() not in b.get("empresa", "").lower():
+                    continue
 
-    with ui.column().classes("w-full max-w-xl mx-auto p-4 gap-6"):
-        ui.label("👤 Meu Perfil e Contatos de Notificação").classes(
-            "text-2xl font-bold text-slate-800"
-        )
+                if select_filtro_cat.value != "TODAS" and b.get("categoria_id") != select_filtro_cat.value:
+                    continue
 
-        with ui.card().classes("w-full p-6 border border-slate-200 bg-white shadow-sm rounded-xl gap-4"):
-            ui.label("📱 Onde deseja receber seus alertas?").classes(
-                "text-lg font-bold text-slate-700"
-            )
-            ui.label(
-                "Estes dados serão utilizados para o envio automático de avisos antes do vencimento dos seus boletos."
-            ).classes("text-sm text-slate-500 mb-2")
+                if select_filtro_status.value != "TODOS" and status_atual != select_filtro_status.value:
+                    continue
 
-            input_email = (
-                ui.input("E-mail para Alertas", value=perfil.get("email_notificacao") or perfil.get("email", ""))
-                .props("outlined dense icon=email")
-                .classes("w-full")
-            )
-            input_whatsapp = (
-                ui.input("Celular / WhatsApp", value=perfil.get("whatsapp", ""))
-                .props("outlined dense placeholder='(11) 99999-9999' icon=phone")
-                .classes("w-full")
-            )
+                if dt_inicio.value and b.get("data_vencimento") and b["data_vencimento"] < dt_inicio.value:
+                    continue
 
-            def salvar_perfil():
-                supabase.table("perfis_usuarios").update({
-                    "email_notificacao": input_email.value.strip() if input_email.value else "",
-                    "whatsapp": input_whatsapp.value.strip() if input_whatsapp.value else "",
-                }).eq("id", user_id).execute()
-                ui.notify("Dados de contato atualizados com sucesso!", color="positive")
-                ui.navigate.to("/")
+                if dt_fim.value and b.get("data_vencimento") and b["data_vencimento"] > dt_fim.value:
+                    continue
 
-            with ui.row().classes("w-full justify-end gap-2 mt-4"):
-                ui.button("Voltar", on_click=lambda: ui.navigate.to("/")).props("flat color=grey")
-                ui.button("SALVAR DADOS DE CONTATO", on_click=salvar_perfil).classes(
-                    "bg-purple-700 hover:bg-purple-800 text-white font-bold px-6 py-2 rounded-lg"
-                )
+                if val_min.value is not None and float(b.get("valor", 0)) < float(val_min.value):
+                    continue
+
+                if val_max.value is not None and float(b.get("valor", 0)) > float(val_max.value):
+                    continue
+
+                # Contagem totalizadora para os rótulos das Abas
+                cnt_todos += 1
+                if status_atual == "PENDENTE":
+                    cnt_pendentes += 1
+                elif status_atual == "ATRASADO":
+                    cnt_atrasados += 1
+                elif status_atual == "PAGO":
+                    cnt_pagos += 1
+
+                # Filtro da Aba Selecionada
+                aba_ativa = tabs.value
+                if aba_ativa == "pendentes" and status_atual != "PENDENTE":
+                    continue
+                elif aba_ativa == "atrasados" and status_atual != "ATRASADO":
+                    continue
+                elif aba_ativa == "pagos" and status_atual != "PAGO":
+                    continue
+
+                boletos_filtrados.append((b, dt_venc, status_atual))
+
+            # Atualização do nome das abas com badges de contagem
+            tab_pendentes.text = f"A Vencer ({cnt_pendentes})"
+            tab_atrasados.text = f"Atrasados ({cnt_atrasados})"
+            tab_pagos.text = f"Pagos ({cnt_pagos})"
+            tab_todos.text = f"Todos ({cnt_todos})"
+
+            if not boletos_filtrados:
+                with container_boletos:
+                    ui.label("Nenhum boleto nesta categoria.").classes("text-slate-500 italic p-4 text-center w-full bg-slate-50 rounded-xl border border-dashed")
+                return
+
+            # Renderização dos Cards
+            with container_boletos:
+                for b, dt_venc, status_efetivo in boletos_filtrados:
+                    
+                    vence_hoje_ou_atrasado = (status_efetivo != "PAGO" and dt_venc and dt_venc <= hoje) or status_efetivo == "ATRASADO"
+                    
+                    if vence_hoje_ou_atrasado:
+                        card_classes = "w-full p-4 bg-red-50 border-2 border-red-500 rounded-xl shadow-md transition-all gap-2"
+                        badge_classes = "bg-red-600 text-white px-2 py-1 rounded text-xs font-bold"
+                        texto_venc_class = "text-red-700 font-extrabold"
+                    else:
+                        card_classes = "w-full p-4 bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all gap-2"
+                        badge_classes = "bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-bold"
+                        texto_venc_class = "text-slate-600 font-medium"
+
+                    with ui.card().classes(card_classes):
+                        with ui.row().classes("w-full justify-between items-center"):
+                            with ui.column().classes("gap-0"):
+                                ui.label(b.get("empresa", "Sem Nome")).classes("text-lg font-bold text-slate-800")
+                                cat_nome = categorias_list.get(b.get("categoria_id"), "Sem Categoria")
+                                ui.label(f"Categoria: {cat_nome}").classes("text-xs text-slate-500")
+
+                            with ui.row().classes("items-center gap-2"):
+                                if status_efetivo == "PAGO":
+                                    ui.label("PAGO").classes("bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold")
+                                elif vence_hoje_ou_atrasado:
+                                    tag_texto = "VENCE HOJE" if dt_venc == hoje else "ATRASADO"
+                                    ui.label(tag_texto).classes(badge_classes)
+                                else:
+                                    ui.label(status_efetivo).classes(badge_classes)
+
+                        ui.separator().classes("my-1")
+
+                        with ui.row().classes("w-full justify-between items-center"):
+                            val_fmt = f"R$ {float(b.get('valor', 0)):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                            ui.label(val_fmt).classes("text-xl font-black text-slate-800")
+                            
+                            venc_str = dt_venc.strftime("%d/%m/%Y") if dt_venc else b.get("data_vencimento", "N/A")
+                            ui.label(f"Vencimento: {venc_str}").classes(f"text-sm {texto_venc_class}")
+
+                        # Botões de Ação
+                        with ui.row().classes("w-full justify-end items-center gap-2 mt-2 pt-2 border-t border-slate-100"):
+                            btn_pago_cor = "positive" if status_efetivo != "PAGO" else "warning"
+                            btn_pago_lbl = "Marcar como Pago" if status_efetivo != "PAGO" else "Marcar Pendente"
+                            btn_pago_ico = "check_circle" if status_efetivo != "PAGO" else "undo"
+
+                            ui.button(btn_pago_lbl, icon=btn_pago_ico, on_click=lambda b=b: alternar_status_pago(b)).props(f"outline size=sm color={btn_pago_cor}")
+                            ui.button("Editar", icon="edit", on_click=lambda b=b: abrir_modal_edicao(b)).props("flat size=sm color=grey-8")
+                            ui.button(icon="delete", on_click=lambda b_id=b["id"]: deletar_boleto(b_id)).props("flat size=sm color=red")
+
+        tabs.on("update:model-value", renderizar_boletos_filtrados)
+        renderizar_boletos_filtrados()
+
+    # ==========================================
+    # 4. RODAPÉ FIXO DE NAVEGAÇÃO / AÇÕES
+    # ==========================================
+   # with ui.footer().classes("bg-slate-900 text-white p-2 border-t border-slate-800 flex justify-around items-center shadow-lg"):
+   #     ui.button("Boletos", icon="receipt", on_click=lambda: ui.navigate.to("/")).props("flat color=white text-color=purple-3").classes("flex-1")
+   #     ui.button("Perfil", icon="person", on_click=lambda: ui.navigate.to("/perfil")).props("flat color=white").classes("flex-1")
+   #     ui.button("Notificações", icon="notifications", on_click=lambda: ui.notify("Notificações ativas!", color="info")).props("flat color=white").classes("flex-1")
+   #     ui.button("Sair", icon="logout", on_click=lambda: (app.storage.user.clear(), ui.navigate.to("/login"))).props("flat color=red-4").classes("flex-1")
 
 
 # ==========================================
