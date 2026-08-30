@@ -1,4 +1,5 @@
-apscheduler
+nicegui
+requests
 supabase
 python-dotenv
-nicegui
+pypdf
