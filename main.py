@@ -1492,6 +1492,20 @@ def admin_page():
                         ).props("color=negative dense size=sm")
 
 
+import os
+import subprocess
+from nicegui import ui
+
+# ... (todo o seu código existente acima permanece igual) ...
+
+# Inicia o agendador em segundo plano de forma assíncrona
+try:
+    subprocess.Popen(["python", "scheduler.py"])
+    print("Scheduler iniciado com sucesso em segundo plano!")
+except Exception as e:
+    print(f"Erro ao iniciar o scheduler: {e}")
+
+# Configuração do servidor NiceGUI para o Render
 port = int(os.environ.get("PORT", 8080))
 ui.run(
     host="0.0.0.0",
