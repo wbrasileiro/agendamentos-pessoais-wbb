@@ -1492,4 +1492,9 @@ def admin_page():
                         ).props("color=negative dense size=sm")
 
 
-ui.run(storage_secret="sua_chave_secreta_aqui")
+port = int(os.environ.get("PORT", 8080))
+ui.run(
+    host="0.0.0.0",
+    port=port,
+    storage_secret="sua_chave_secreta_aqui"
+)
