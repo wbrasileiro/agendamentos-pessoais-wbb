@@ -1492,6 +1492,14 @@ def admin_page():
                         ).props("color=negative dense size=sm")
 
 
+from nicegui import app
+
+# Rota leve apenas para o bot de ping responder status 200
+@app.get('/ping')
+def ping():
+    return {'status': 'ok'}                        
+
+
 import os
 import subprocess
 from nicegui import ui
