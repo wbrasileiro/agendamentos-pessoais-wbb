@@ -1,3 +1,4 @@
 apscheduler
 supabase
 python-dotenv
+nicegui
