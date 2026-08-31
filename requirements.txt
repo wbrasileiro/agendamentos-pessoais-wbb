@@ -1,5 +1,8 @@
 nicegui
-requests
 supabase
 python-dotenv
+easyocr
+pytesseract
+pillow
+requests
 pypdf
