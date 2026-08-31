@@ -3,6 +3,7 @@ supabase
 python-dotenv
 easyocr
 pytesseract
-pillow
+Pillow
 requests
+pdfplumber
 pypdf

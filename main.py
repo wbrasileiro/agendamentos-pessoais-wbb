@@ -19,10 +19,10 @@ import pytesseract
 import requests
 from supabase import Client, create_client
 
-# Silencia logs de aviso
+# Silencia logs de aviso de concorrencia
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
-# Carrega configurações externadas
+# Carrega as configurações de ambiente
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -35,17 +35,33 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Inicializa o leitor EasyOCR em Português e Inglês
-reader_ocr = easyocr.Reader(["pt", "en"], gpu=False)
+# Singleton Pattern / Lazy Initialization para o leitor EasyOCR
+_ocr_reader_instance = None
+
+def get_ocr_reader():
+    global _ocr_reader_instance
+    if _ocr_reader_instance is None:
+        _ocr_reader_instance = easyocr.Reader(["pt", "en"], gpu=False)
+    return _ocr_reader_instance
+
+
+# --- PATTERNS REGEX PRÉ-COMPILADOS ---
+EMAIL_REGEX = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w+$")
+COD_BARRAS_FMT_REGEX = re.compile(
+    r'\b(\d{5}[\.\s]?\d{5}\s+\d{5}[\.\s]?\d{6}\s+\d{5}[\.\s]?\d{6}\s+\d\s+\d{14})\b'
+)
+VALOR_REGEX = re.compile(r"\b(\d{1,3}(?:\.\d{3})*,\d{2})\b")
+SUFIXO_EMPRESA_REGEX = re.compile(r"^(.*?\b(?:LTDA|S\.?A\.?|ME|EPP|EIRELI)\b)", re.IGNORECASE)
+PREFIXO_EMPRESA_REGEX = re.compile(r"^(BENEFICI[ÁA]RIO|CEDENTE|RAZ[ÃA]O SOCIAL|NOME)\s*:?", re.IGNORECASE)
 
 
 # --- FUNÇÕES AUXILIARES ---
-def obter_hora_brasilia():
+def obter_hora_brasilia() -> datetime:
     return datetime.now(ZoneInfo("America/Sao_Paulo"))
 
 
 def email_valido(email_str: str) -> bool:
-    return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email_str.strip()))
+    return bool(EMAIL_REGEX.match(email_str.strip()))
 
 
 def formatar_br(valor) -> str:
@@ -54,6 +70,17 @@ def formatar_br(valor) -> str:
         return f"{val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except (ValueError, TypeError):
         return "0,00"
+
+
+def validar_telefone(telefone: str) -> tuple[bool, str]:
+    tel_limpo = telefone.strip() if telefone else ""
+    if not tel_limpo:
+        return False, "O número de telefone/WhatsApp é obrigatório."
+    if not tel_limpo.isdigit():
+        return False, "O telefone deve conter apenas números (sem traços, espaços ou parênteses, ex: 11999999999)."
+    if len(tel_limpo) < 10 or len(tel_limpo) > 11:
+        return False, "O telefone deve conter DDD + número com 10 ou 11 dígitos (ex: 11977051343)."
+    return True, ""
 
 
 def orientar_imagem(img_stream, callback_status=None):
@@ -77,17 +104,15 @@ def orientar_imagem(img_stream, callback_status=None):
 
 
 def extrair_dados_imagem_easyocr(img_stream, callback_status=None):
-    """
-    Extrai informações do documento (Empresa, Valor, Vencimento, Código de Barras).
-    Aceita 'callback_status' para reportar o progresso em linguagem amigável.
-    """
+    """Extrai informações do documento usando OCR sob demanda."""
     img_stream = orientar_imagem(img_stream, callback_status)
 
     if callback_status:
         callback_status("Analisando o texto do documento...")
 
     image = Image.open(img_stream)
-    detalhes = reader_ocr.readtext(image, detail=1)
+    reader = get_ocr_reader()
+    detalhes = reader.readtext(image, detail=1)
     texto_full = " ".join([item[1] for item in detalhes])
 
     empresa = None
@@ -98,10 +123,7 @@ def extrair_dados_imagem_easyocr(img_stream, callback_status=None):
     if callback_status:
         callback_status("Localizando código de barras e dados de pagamento...")
 
-    match_fmt = re.search(
-        r'\b(\d{5}[\.\s]?\d{5}\s+\d{5}[\.\s]?\d{6}\s+\d{5}[\.\s]?\d{6}\s+\d\s+\d{14})\b',
-        texto_full
-    )
+    match_fmt = COD_BARRAS_FMT_REGEX.search(texto_full)
     if match_fmt:
         codigo_barras = re.sub(r"\D", "", match_fmt.group(1))
 
@@ -128,8 +150,7 @@ def extrair_dados_imagem_easyocr(img_stream, callback_status=None):
             valor = val_centavos / 100.0
 
     if not valor:
-        candidatos_valor = re.findall(r"\b(\d{1,3}(?:\.\d{3})*,\d{2})\b", texto_full)
-        for cand in candidatos_valor:
+        for cand in VALOR_REGEX.findall(texto_full):
             try:
                 val_flt = float(cand.replace(".", "").replace(",", "."))
                 if val_flt >= 5.0:
@@ -157,17 +178,17 @@ def extrair_dados_imagem_easyocr(img_stream, callback_status=None):
     if callback_status:
         callback_status("Identificando a empresa / beneficiário...")
 
-    termos_proibidos = [
+    termos_proibidos = (
         "BANCO", "BRADESCO", "ITAU", "SANTANDER", "CAIXA", "BRASIL",
         "LOCAL DE PAGAMENTO", "PAGAVEL", "PREFERENCIALMENTE", "VENCIMENTO",
         "CARTEIRA", "ESPECIE", "COMPROVANTE", "FICHA DE COMPENSACAO",
-    ]
+    )
 
     for item in detalhes:
         txt = item[1].strip()
         txt_upper = txt.upper()
         if re.search(r"\b(LTDA|S\.?A\.?|ME|EPP|EIRELI)\b", txt_upper):
-            txt_limpo = re.sub(r"^(BENEFICI[ÁA]RIO|CEDENTE|RAZ[ÃA]O SOCIAL|NOME)\s*:?", "", txt, flags=re.IGNORECASE).strip()
+            txt_limpo = PREFIXO_EMPRESA_REGEX.sub("", txt).strip()
             if not any(tp in txt_upper for tp in termos_proibidos):
                 empresa = txt_limpo
                 break
@@ -191,12 +212,12 @@ def extrair_dados_imagem_easyocr(img_stream, callback_status=None):
             txt = item[1].strip()
             txt_upper = txt.upper()
             if len(txt) > 4 and not any(tp in txt_upper for tp in termos_proibidos):
-                if not re.search(r"^\d+$", txt):
+                if not txt.isdigit():
                     empresa = txt
                     break
 
     if empresa:
-        match_sufixo = re.search(r"^(.*?\b(?:LTDA|S\.?A\.?|ME|EPP|EIRELI)\b)", empresa, re.IGNORECASE)
+        match_sufixo = SUFIXO_EMPRESA_REGEX.search(empresa)
         if match_sufixo:
             empresa = match_sufixo.group(1).strip()
         else:
@@ -210,9 +231,17 @@ def extrair_dados_imagem_easyocr(img_stream, callback_status=None):
 
 
 # --- NOTIFICAÇÕES (TELEGRAM & E-MAIL) ---
-def enviar_notificacao_telegram(email_solicitante: str, telefone: str, dispositivo: str, localizacao: str):
+def _enviar_telegram_sync(mensagem: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": mensagem, "parse_mode": "HTML"}, timeout=5)
+    except Exception as e:
+        print(f"Erro Telegram: {e}")
+
+
+def enviar_notificacao_telegram(email_solicitante: str, telefone: str, dispositivo: str, localizacao: str):
     mensagem = (
         f"🚨 <b>SOLICITAÇÃO DE ACESSO - AGENDAMENTOS</b>\n\n"
         f"📧 <b>E-mail:</b> {email_solicitante}\n"
@@ -220,11 +249,7 @@ def enviar_notificacao_telegram(email_solicitante: str, telefone: str, dispositi
         f"📱 <b>Dispositivo:</b> {dispositivo[:60]}\n"
         f"📍 <b>Localização:</b> {localizacao}"
     )
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": mensagem, "parse_mode": "HTML"}, timeout=5)
-    except Exception as e:
-        print(f"Erro Telegram: {e}")
+    _enviar_telegram_sync(mensagem)
 
 
 def _enviar_email_worker(solicitante_email, telefone, dispositivo, localizacao):
@@ -324,8 +349,6 @@ def login_page():
     def abrir_modal_solicitacao():
         with ui.dialog() as dialog, ui.card().classes("w-full max-w-sm p-4"):
             ui.label("Solicitar Acesso").classes("text-xl font-bold text-gray-800 mb-1")
-            
-            # Mensagem explicativa do cadastro de telefone
             ui.label(
                 "ℹ️ Seu número de telefone será utilizado para o envio automático de alertas de vencimento."
             ).classes("text-xs text-blue-800 bg-blue-50 p-2 rounded mb-3 border border-blue-200 font-medium")
@@ -343,54 +366,50 @@ def login_page():
             )
 
             async def processar_solicitacao():
-                            email_txt = (solicita_email.value or "").strip().lower()
-                            telefone_txt = (solicita_telefone.value or "").strip()
-                            senha_txt = (solicita_senha.value or "").strip()
+                email_txt = (solicita_email.value or "").strip().lower()
+                telefone_txt = (solicita_telefone.value or "").strip()
+                senha_txt = (solicita_senha.value or "").strip()
 
-                            # 1. Validação de preenchimento dos campos
-                            if not email_valido(email_txt) or not telefone_txt or not senha_txt:
-                                ui.notify("Preencha todos os campos corretamente!", color="warning")
-                                return
+                if not email_valido(email_txt) or not telefone_txt or not senha_txt:
+                    ui.notify("Preencha todos os campos corretamente!", color="warning")
+                    return
 
-                            # 2. VALIDAÇÃO DO FORMATO DO TELEFONE (Cole aqui)
-                            e_valido, msg_erro = validar_telefone(telefone_txt)
-                            if not e_valido:
-                                ui.notify(msg_erro, color="negative", size="lg")
-                                return  # Interrompe o envio se o telefone contiver traços ou formato inválido                            
+                e_valido, msg_erro = validar_telefone(telefone_txt)
+                if not e_valido:
+                    ui.notify(msg_erro, color="negative", size="lg")
+                    return
 
-                            user_agent = str(ui.context.client.environ.get("HTTP_USER_AGENT", "Dispositivo Móvel"))[:150]
-                            loc_text = "Não informada"
+                user_agent = str(ui.context.client.environ.get("HTTP_USER_AGENT", "Dispositivo Móvel"))[:150]
+                loc_text = "Não informada"
 
-                            try:
-                                ip_cliente = ui.context.client.environ.get("REMOTE_ADDR", "")
-                                ip_data = requests.get(f"https://ipapi.co/{ip_cliente}/json/", timeout=2).json()
-                                loc_text = f"{ip_data.get('city')}, {ip_data.get('region')}"
-                            except Exception:
-                                pass
+                try:
+                    ip_cliente = ui.context.client.environ.get("REMOTE_ADDR", "")
+                    ip_res = await asyncio.to_thread(requests.get, f"https://ipapi.co/{ip_cliente}/json/", timeout=2)
+                    ip_data = ip_res.json()
+                    loc_text = f"{ip_data.get('city')}, {ip_data.get('region')}"
+                except Exception:
+                    pass
 
-                            # Tenta salvar no Supabase e trata a falha
-                            try:
-                                res = supabase.table("solicitacoes_acesso").insert({
-                                    "created_at": obter_hora_brasilia().isoformat(),
-                                    "email": email_txt,
-                                    "telefone": telefone_txt,
-                                    "senha_temporaria": senha_txt,
-                                    "dispositivo": user_agent,
-                                    "localizacao": loc_text,
-                                }).execute()
-                                
-                                dialog.close()
+                try:
+                    supabase.table("solicitacoes_acesso").insert({
+                        "created_at": obter_hora_brasilia().isoformat(),
+                        "email": email_txt,
+                        "telefone": telefone_txt,
+                        "senha_temporaria": senha_txt,
+                        "dispositivo": user_agent,
+                        "localizacao": loc_text,
+                    }).execute()
+                    
+                    dialog.close()
 
-                                # Dispara e-mails e alertas apenas se gravou no banco com sucesso
-                                asyncio.create_task(asyncio.to_thread(enviar_notificacao_email, email_txt, telefone_txt, user_agent, loc_text))
-                                asyncio.create_task(asyncio.to_thread(enviar_notificacao_telegram, email_txt, telefone_txt, user_agent, loc_text))
+                    await asyncio.to_thread(enviar_notificacao_email, email_txt, telefone_txt, user_agent, loc_text)
+                    await asyncio.to_thread(enviar_notificacao_telegram, email_txt, telefone_txt, user_agent, loc_text)
 
-                                ui.notify("Solicitação enviada com sucesso ao Administrador!", color="positive")
+                    ui.notify("Solicitação enviada com sucesso ao Administrador!", color="positive")
 
-                            except Exception as e:
-                                print(f"Erro Supabase ao salvar solicitação: {e}")
-                                ui.notify(f"Erro ao salvar solicitação no banco de dados. Tente novamente.", color="negative")
-
+                except Exception as e:
+                    print(f"Erro Supabase ao salvar solicitação: {e}")
+                    ui.notify("Erro ao salvar solicitação no banco de dados. Tente novamente.", color="negative")
 
             ui.button("ENVIAR SOLICITAÇÃO", on_click=processar_solicitacao).classes(
                 "w-full bg-blue-600 text-white font-bold mb-2"
@@ -445,14 +464,11 @@ def home_page():
     res_perfil = supabase.table("perfis_usuarios").select("*").eq("id", user_id).execute()
     perfil_usr = res_perfil.data[0] if res_perfil.data else {}
     email_cadastrado = perfil_usr.get("email_notificacao") or perfil_usr.get("email", "")
-    
-    # Busca whatsapp ou telefone cadastrado no perfil
     whatsapp_cadastrado = perfil_usr.get("whatsapp") or perfil_usr.get("telefone", "")
 
     cats_res = supabase.table("dim_categorias").select("*").execute()
     categorias_list = {c["id"]: c["nome"] for c in (cats_res.data or [])}
 
-    # --- Função para abrir o Modal de Alteração de Contato ---
     def abrir_modal_perfil():
         dialog = ui.dialog()
         with dialog, ui.card().classes("w-full max-w-md p-5 gap-4 bg-white rounded-2xl"):
@@ -466,7 +482,6 @@ def home_page():
                 novo_email = input_email.value.strip() if input_email.value else ""
 
                 try:
-                    # Atualiza as colunas 'whatsapp' e 'telefone' para manter o Painel Admin sincronizado
                     payload_perfil = {
                         "whatsapp": novo_tel,
                         "telefone": novo_tel,
@@ -502,10 +517,7 @@ def home_page():
                             f"Contato: {whatsapp_cadastrado or email_cadastrado or 'Não configurado'}"
                         ).classes("text-sm text-purple-900 font-semibold")
                     
-                    # Botão 'Alterar' atualizado para abrir o dialog diretamente
-                    ui.button("Alterar", on_click=abrir_modal_perfil).props(
-                        "flat dense size=md color=purple"
-                    )
+                    ui.button("Alterar", on_click=abrir_modal_perfil).props("flat dense size=md color=purple")
 
         with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-4"):
             ui.label("➕ Cadastrar Novo Boleto").classes("text-xl sm:text-2xl font-bold text-slate-800 border-b pb-2 w-full")
@@ -597,7 +609,6 @@ def home_page():
             container_importacao.bind_visibility_from(modo, "value", backward=lambda v: v == "arquivo")
 
             def finalizar_importacao_e_focar():
-                """Subir a tela e focar no primeiro campo."""
                 ui.run_javascript("window.scrollTo({top: 0, behavior: 'smooth'});")
                 input_empresa.run_method("focus")
 
@@ -980,10 +991,7 @@ def home_page():
             hoje = datetime.now().date()
 
             boletos_filtrados = []
-            cnt_pendentes = 0
-            cnt_atrasados = 0
-            cnt_pagos = 0
-            cnt_todos = 0
+            cnt_pendentes = cnt_atrasados = cnt_pagos = cnt_todos = 0
 
             for b in boletos_dados:
                 dt_venc = None
@@ -1124,31 +1132,6 @@ def home_page():
         renderizar_boletos_filtrados()
 
 
-
-# ==========================================
-# FUNÇÃO AUXILIAR DE VALIDAÇÃO DE TELEFONE
-# ==========================================
-def validar_telefone(telefone: str) -> tuple[bool, str]:
-    """
-    Valida se o telefone contém apenas números (incluindo DDD).
-    Retorna (True, "") se válido ou (False, mensagem_erro) se inválido.
-    """
-    tel_limpo = telefone.strip() if telefone else ""
-    
-    if not tel_limpo:
-        return False, "O número de telefone/WhatsApp é obrigatório."
-    
-    # Verifica se contém apenas números
-    if not tel_limpo.isdigit():
-        return False, "O telefone deve conter apenas números (sem traços, espaços ou parênteses, ex: 11999999999)."
-    
-    # Verifica se o número possui tamanho válido para DDD + Telefone (10 a 11 dígitos)
-    if len(tel_limpo) < 10 or len(tel_limpo) > 11:
-        return False, "O telefone deve conter DDD + número com 10 ou 11 dígitos (ex: 11977051343)."
-        
-    return True, ""
-
-
 # ==========================================
 # PAINEL EXCLUSIVO DO ADMIN
 # ==========================================
@@ -1165,7 +1148,6 @@ def admin_page():
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-6"):
         ui.label("⚙️ Painel do Administrador").classes("text-2xl font-bold text-amber-900")
 
-        # 1. SOLICITAÇÕES PENDENTES (Exibe apenas se houver solicitações)
         solicitacoes = (
             supabase.table("solicitacoes_acesso")
             .select("*")
@@ -1192,7 +1174,6 @@ def admin_page():
                             async def aprovar(s=sol):
                                 telefone_informado = s.get("telefone") or s.get("whatsapp") or ""
                                 
-                                # Validação do Telefone
                                 e_valido, msg_erro = validar_telefone(telefone_informado)
                                 if not e_valido:
                                     ui.notify(
@@ -1206,7 +1187,6 @@ def admin_page():
                                 email_usuario = s["email"].strip()
 
                                 try:
-                                    # Grava o mesmo e-mail nos dois campos e salva o WhatsApp
                                     payload_perfil = {
                                         "email": email_usuario,
                                         "email_notificacao": email_usuario,
@@ -1232,7 +1212,6 @@ def admin_page():
                             ui.button("APROVAR", on_click=aprovar).classes("bg-blue-600 text-white text-xs font-bold")
                             ui.button("REJEITAR", on_click=rejeitar).classes("bg-red-600 text-white text-xs font-bold")
 
-        # 2. GERENCIAMENTO DE USUÁRIOS
         usuarios = supabase.table("perfis_usuarios").select("*").order("email").execute().data or []
 
         with ui.card().classes("w-full p-5 border border-amber-200 bg-white shadow-sm rounded-xl"):
@@ -1286,15 +1265,9 @@ def admin_page():
                     if usr.get("email") != ADMIN_EMAIL:
                         with ui.row().classes("gap-2 items-center"):
                             is_ativo = usr.get("ativo", True)
-                            
-                            if is_ativo:
-                                btn_text = "INATIVAR"
-                                btn_class = "bg-amber-500 hover:bg-amber-600 text-white"
-                                btn_icon = "block"
-                            else:
-                                btn_text = "ATIVAR"
-                                btn_class = "bg-emerald-600 hover:bg-emerald-700 text-white"
-                                btn_icon = "check_circle"
+                            btn_text = "INATIVAR" if is_ativo else "ATIVAR"
+                            btn_class = "bg-amber-500 hover:bg-amber-600 text-white" if is_ativo else "bg-emerald-600 hover:bg-emerald-700 text-white"
+                            btn_icon = "block" if is_ativo else "check_circle"
 
                             ui.button(btn_text, icon=btn_icon, on_click=alternar_status).classes(
                                 f"font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition-all {btn_class}"
@@ -1304,7 +1277,6 @@ def admin_page():
                                 "bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition-all"
                             )
 
-        # 3. TESTE DE ALERTAS VIA BOT
         with ui.card().classes("w-full p-4 border border-blue-200 bg-white shadow-sm"):
             ui.label("🧪 Teste de Envio de Alertas").classes("text-lg font-bold mb-1 text-blue-900")
             ui.label("Selecione um usuário para enviar um alerta de teste em tempo real via Bot.").classes("text-xs text-gray-600 mb-3")
@@ -1341,7 +1313,6 @@ def admin_page():
 
                 ui.button("ENVIAR ALERTA DE TESTE", on_click=disparar_teste_alerta).classes("bg-blue-600 text-white font-bold h-10 text-xs")
 
-        # 4. GERENCIAMENTO DE CATEGORIAS
         with ui.card().classes("w-full p-4 border border-amber-200 bg-white shadow-sm"):
             ui.label("🏷️ Categorias de Contas").classes("text-lg font-bold mb-2")
 
@@ -1408,13 +1379,12 @@ def admin_page():
                         ui.button("Excluir", on_click=confirmar_exclusao_categoria).props("color=negative dense size=sm")
 
 
-# Rota leve para Keep-Alive / Health Check
 @app.get("/ping")
 def ping():
     return {"status": "ok"}
 
 
-# Inicializador do Scheduler e Servidor NiceGUI
+# Inicialização segura do processo em segundo plano
 try:
     subprocess.Popen(["python", "scheduler.py"])
     print("Scheduler iniciado com sucesso em segundo plano!")
