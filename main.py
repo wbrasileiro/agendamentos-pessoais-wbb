@@ -405,180 +405,179 @@ def home_page():
     cabecalho_app(drawer)
     user_id = app.storage.user.get("user_id")
 
-    cats_res = supabase.table("dim_categorias").select("*").execute()
-    categorias_list = {c["id"]: c["nome"] for c in (cats_res.data or [])}
+    # Busca categoria "Boleto" no banco sem exibir o campo visualmente
+    categoria_boleto_id = None
+    try:
+        cats_res = supabase.table("dim_categorias").select("*").execute()
+        if cats_res.data:
+            for c in cats_res.data:
+                if "boleto" in c["nome"].lower():
+                    categoria_boleto_id = c["id"]
+                    break
+            if not categoria_boleto_id and len(cats_res.data) > 0:
+                categoria_boleto_id = cats_res.data[0]["id"]
+    except Exception as e:
+        print(f"Erro ao buscar categorias: {e}")
 
-    # Verifica se há rascunho salvo do formulário na sessão
-    rascunho = app.storage.user.get("draft_boleto", {})
+    # Checagem estrita da autenticação
+    esta_autenticado = bool(user_id and user_id in user_tokens)
+
+    def conectar_google():
+        flow = obter_flow()
+        auth_url, state = flow.authorization_url(prompt='consent', access_type='offline')
+        app.storage.user["code_verifier"] = flow.code_verifier
+        app.storage.user["oauth_state"] = state
+        ui.navigate.to(auth_url, new_tab=False)
 
     with ui.column().classes("w-full max-w-4xl mx-auto p-3 sm:p-6 gap-6 font-sans pb-32"):
-        with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-4"):
-            ui.label("➕ Cadastrar Novo Boleto").classes("text-xl sm:text-2xl font-bold text-slate-800 border-b pb-2 w-full")
-
-            with ui.column().classes("w-full gap-4"):
-                input_empresa = ui.input(
-                    "Empresa / Nome do Boleto",
-                    value=rascunho.get("empresa", ""),
-                    placeholder="Ex: Conta de Luz, Internet..."
-                ).props("outlined size=lg bg-slate-50").classes("w-full text-lg")
-
-                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-4"):
-                    input_valor = ui.number(
-                        "Valor (R$)",
-                        value=rascunho.get("valor"),
-                        format="%.2f",
-                        placeholder="0,00"
-                    ).props("outlined size=lg bg-slate-50 input-class=text-lg").classes("w-full")
-
-                    input_vencimento = ui.input(
-                        "Data de Vencimento",
-                        value=rascunho.get("vencimento", "")
-                    ).props("type=date outlined size=lg bg-slate-50").classes("w-full")
-
-                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-4"):
-                    select_categoria = ui.select(
-                        categorias_list,
-                        value=rascunho.get("categoria"),
-                        label="Categoria"
-                    ).props("outlined size=lg bg-slate-50").classes("w-full")
-
-                    select_status = ui.select(
-                        ["PENDENTE", "PAGO", "ATRASADO", "CANCELADO"],
-                        value=rascunho.get("status", "PENDENTE"),
-                        label="Status Inicial"
-                    ).props("outlined size=lg bg-slate-50").classes("w-full")
-
-            check_lembrete = ui.checkbox(
-                "🔔 Desejo receber um lembrete no Google Calendar",
-                value=rascunho.get("tem_lembrete", False)
-            ).classes("mt-2 text-base sm:text-lg text-slate-800 font-bold")
-
-            container_lembrete = ui.column().classes("w-full p-4 bg-purple-50 border-2 border-purple-200 rounded-xl gap-4")
-            container_lembrete.bind_visibility_from(check_lembrete, "value")
-
-            with container_lembrete:
-                ui.label("Configuração do Lembrete (Google Calendar)").classes("text-sm font-bold text-purple-800 uppercase tracking-wide")
+        
+        # ----------------------------------------------------
+        # CASO 1: DESCONECTADO (MOSTRA APENAS O CARD DE AVISO)
+        # ----------------------------------------------------
+        if not esta_autenticado:
+            with ui.card().classes("w-full p-8 border border-blue-200 bg-blue-50/70 shadow-md rounded-2xl gap-5 text-center my-4"):
+                ui.label("ℹ️ Conecte sua conta do Google Calendar").classes("text-xl sm:text-2xl font-bold text-blue-900 w-full")
                 
-                # Indicador de autenticação do Google
-                esta_autenticado = user_id in user_tokens
+                ui.label(
+                    "Para cadastrar seus boletos e receber alertas automáticos de vencimento, "
+                    "faça a conexão com a sua conta do Google Calendar."
+                ).classes("text-base text-slate-700 leading-relaxed max-w-2xl mx-auto")
 
-                def conectar_google():
-                    # Preserva o preenchimento do formulário no armazenamento da sessão
-                    app.storage.user["draft_boleto"] = {
-                        "empresa": input_empresa.value or "",
-                        "valor": input_valor.value,
-                        "vencimento": input_vencimento.value or "",
-                        "categoria": select_categoria.value,
-                        "status": select_status.value or "PENDENTE",
-                        "tem_lembrete": True,
-                        "antecedencia": select_antecedencia.value,
-                        "horario": input_horario.value or "09:00",
-                    }
+                ui.button(
+                    "🔗 Conectar conta Google", 
+                    on_click=conectar_google
+                ).classes("bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-3 px-8 rounded-xl shadow mx-auto mt-2")
 
-                    flow = obter_flow()
-                    auth_url, state = flow.authorization_url(prompt='consent', access_type='offline')
-                    
-                    # Salva o code_verifier gerado no Flow e o state na sessão
-                    app.storage.user["code_verifier"] = flow.code_verifier
-                    app.storage.user["oauth_state"] = state
-                    
-                    ui.navigate.to(auth_url, new_tab=False)
-
-                if esta_autenticado:
-                    ui.label("✅ Conectado ao Google Calendar").classes("text-xs font-bold text-green-700 bg-green-100 p-2 rounded")
-                else:
-                    ui.button("🔗 Conectar Conta Google", on_click=conectar_google).classes("bg-red-500 text-white font-bold text-xs")
-
-                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-3"):
-                    select_antecedencia = ui.select(
-                        {0: "No dia do vencimento", 1: "1 dia antes", 2: "2 dias antes", 3: "3 dias antes", 4: "4 dias antes", 5: "5 dias antes"},
-                        value=rascunho.get("antecedencia", 1),
-                        label="Antecedência do Aviso",
-                    ).props("outlined bg-white size=lg").classes("w-full")
-
-                    input_horario = ui.input(
-                        "Horário do Alerta",
-                        value=rascunho.get("horario", "09:00")
-                    ).props("type=time outlined bg-white size=lg").classes("w-full")
-
-            # Notifica e limpa o rascunho restaurado
-            if rascunho:
-                ui.notify("Conexão com Google Calendar estabelecida com sucesso!", color="info")
-                app.storage.user.pop("draft_boleto", None)
-
-            def limpar_formulario():
-                input_empresa.value = ""
-                input_valor.value = None
-                input_vencimento.value = None
-                select_categoria.value = None
-                select_status.value = "PENDENTE"
-                check_lembrete.value = False
-                select_antecedencia.value = 1
-                input_horario.value = "09:00"
-                app.storage.user.pop("draft_boleto", None)
-
-            async def salvar_boleto():
-                empresa_val = input_empresa.value.strip() if input_empresa.value else ""
-                valor_val = float(input_valor.value) if input_valor.value else 0.0
-                vencimento_val = input_vencimento.value
-
-                if not empresa_val or not valor_val or not vencimento_val:
-                    ui.notify("Por favor, preencha Empresa, Valor e Vencimento!", color="warning", size="lg")
-                    return
-
-                # --- VALIDAÇÃO DE AUTENTICAÇÃO DO GOOGLE ---
-                if check_lembrete.value and user_id not in user_tokens:
-                    ui.notify(
-                        "⚠️ Por favor, clique em 'CONECTAR CONTA GOOGLE' antes de salvar o lembrete!",
-                        color="warning",
-                        size="lg"
+        # ----------------------------------------------------
+        # CASO 2: CONECTADO (FORMULÁRIO AJUSTADO)
+        # ----------------------------------------------------
+        else:
+            with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-5"):
+                
+                # Indicador movido para o topo da página (no cabeçalho)
+                with ui.row().classes("w-full items-center justify-between border-b pb-3 gap-2"):
+                    ui.label("➕ Cadastrar novo boleto").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+                    ui.label("✅ Conectado ao Google Calendar").classes(
+                        "text-xs sm:text-sm font-bold text-green-800 bg-green-100 px-3 py-1.5 rounded-lg border border-green-300"
                     )
-                    return
 
-                try:
-                    dup_res = supabase.table("boletos").select("id").eq("user_id", user_id).eq("empresa", empresa_val).eq("valor", valor_val).eq("data_vencimento", vencimento_val).execute()
-                    if dup_res.data and len(dup_res.data) > 0:
-                        ui.notify("⚠️ Atenção: Este boleto já está cadastrado no sistema!", color="warning", size="lg")
+                # Padronização de fontes para todos os campos
+                input_props = "outlined bg-slate-50 input-class=text-base"
+
+                # Campos Principais (Campo Categoria Removido)
+                with ui.column().classes("w-full gap-5"):
+                    input_empresa = ui.input(
+                        "Empresa / Nome do boleto",
+                        placeholder="Ex: Boticário, Eudora..."
+                    ).props(input_props).classes("w-full")
+
+                    with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-5"):
+                        input_valor = ui.number(
+                            "Valor (R$)",
+                            format="%.2f",
+                            placeholder="0,00"
+                        ).props(input_props).classes("w-full")
+
+                        input_vencimento = ui.input(
+                            "Data de vencimento"
+                        ).props(f"{input_props} type=date").classes("w-full")
+
+                    # Status inicial com opções em Title Case (Pendente)
+                    select_status = ui.select(
+                        ["Pendente", "Pago", "Atrasado", "Cancelado"],
+                        value="Pendente",
+                        label="Status inicial"
+                    ).props(input_props).classes("w-full")
+
+                # Checkbox em Title Case
+                check_lembrete = ui.checkbox(
+                    "🔔 Desejo receber um lembrete no Google Calendar",
+                    value=True
+                ).classes("mt-3 text-base sm:text-lg text-slate-800 font-bold")
+
+                # Container de lembrete limpo sem badges repetidos dentro
+                container_lembrete = ui.column().classes("w-full p-5 bg-purple-50/50 border border-purple-200 rounded-xl gap-4")
+                container_lembrete.bind_visibility_from(check_lembrete, "value")
+
+                with container_lembrete:
+                    ui.label("Configuração do lembrete").classes("text-sm font-bold text-purple-900 uppercase tracking-wide")
+
+                    with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-4"):
+                        select_antecedencia = ui.select(
+                            {0: "No dia do vencimento", 1: "1 dia antes", 2: "2 dias antes", 3: "3 dias antes", 4: "4 dias antes", 5: "5 dias antes"},
+                            value=1,
+                            label="Antecedência do aviso",
+                        ).props("outlined bg-white input-class=text-base").classes("w-full")
+
+                        # Horário Padrão alterado para 12:00
+                        input_horario = ui.input(
+                            "Horário do alerta",
+                            value="12:00"
+                        ).props("type=time outlined bg-white input-class=text-base").classes("w-full")
+
+                def limpar_formulario():
+                    input_empresa.value = ""
+                    input_valor.value = None
+                    input_vencimento.value = None
+                    select_status.value = "Pendente"
+                    check_lembrete.value = True
+                    select_antecedencia.value = 1
+                    input_horario.value = "12:00"
+
+                async def salvar_boleto():
+                    empresa_val = input_empresa.value.strip() if input_empresa.value else ""
+                    valor_val = float(input_valor.value) if input_valor.value else 0.0
+                    vencimento_val = input_vencimento.value
+
+                    if not empresa_val or not valor_val or not vencimento_val:
+                        ui.notify("Por favor, preencha empresa, valor e vencimento!", color="warning", size="lg")
                         return
 
-                    payload = {
-                        "user_id": user_id,
-                        "empresa": empresa_val,
-                        "valor": valor_val,
-                        "data_vencimento": vencimento_val,
-                        "categoria_id": select_categoria.value if select_categoria.value else None,
-                        "status": select_status.value,
-                        "tem_lembrete": check_lembrete.value,
-                    }
+                    try:
+                        dup_res = supabase.table("boletos").select("id").eq("user_id", user_id).eq("empresa", empresa_val).eq("valor", valor_val).eq("data_vencimento", vencimento_val).execute()
+                        if dup_res.data and len(dup_res.data) > 0:
+                            ui.notify("⚠️ Atenção: Este boleto já está cadastrado no sistema!", color="warning", size="lg")
+                            return
 
-                    if check_lembrete.value:
-                        payload["canal_lembrete"] = "Google Calendar"
-                        payload["antecedencia_dias"] = select_antecedencia.value
-                        payload["horario_lembrete"] = input_horario.value
+                        status_formatado = str(select_status.value).strip().capitalize() if select_status.value else "Pendente"
 
-                        # Integração com o Google Calendar via OAuth 2.0 Web
-                        await asyncio.to_thread(
-                            criar_evento_google_calendar_oauth,
-                            user_id,
-                            empresa_val,
-                            valor_val,
-                            vencimento_val,
-                            select_antecedencia.value,
-                            input_horario.value,
-                        )
+                        payload = {
+                            "user_id": user_id,
+                            "empresa": empresa_val,
+                            "valor": valor_val,
+                            "data_vencimento": vencimento_val,
+                            "categoria_id": categoria_boleto_id,
+                            "status": status_formatado,
+                            "tem_lembrete": check_lembrete.value,
+                        }
 
-                    # Salva no Banco de Dados Supabase
-                    supabase.table("boletos").insert(payload).execute()
+                        if check_lembrete.value:
+                            payload["canal_lembrete"] = "Google Calendar"
+                            payload["antecedencia_dias"] = select_antecedencia.value
+                            payload["horario_lembrete"] = input_horario.value
 
-                    ui.notify("✅ Boleto e agendamento salvos com sucesso!", color="positive", size="lg")
-                    limpar_formulario()
+                            await asyncio.to_thread(
+                                criar_evento_google_calendar_oauth,
+                                user_id,
+                                empresa_val,
+                                valor_val,
+                                vencimento_val,
+                                select_antecedencia.value,
+                                input_horario.value,
+                            )
 
-                except Exception as err:
-                    ui.notify(f"❌ Erro ao salvar o boleto: {err}", color="negative", size="lg")
+                        supabase.table("boletos").insert(payload).execute()
 
-            ui.button("💾 CONFIRMAR E SALVAR BOLETO", on_click=salvar_boleto).classes(
-                "bg-green-600 hover:bg-green-700 text-white font-extrabold text-lg mt-2 w-full py-4 rounded-xl shadow-lg"
-            )
+                        ui.notify("✅ Boleto salvo com sucesso!", color="positive", size="lg")
+                        limpar_formulario()
+
+                    except Exception as err:
+                        ui.notify(f"❌ Erro ao salvar o boleto: {err}", color="negative", size="lg")
+
+                # Botão atualizado para Title Case: "💾 Salvar boleto"
+                ui.button("💾 Salvar boleto", on_click=salvar_boleto).classes(
+                    "bg-green-600 hover:bg-green-700 text-white font-bold text-lg mt-3 w-full py-3.5 rounded-xl shadow"
+                )
 
 
 # ==========================================
