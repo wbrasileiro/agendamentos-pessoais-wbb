@@ -284,15 +284,20 @@ def menu_drawer():
                 ):
                     ui.label("⚙️ Painel de Manutenção").classes("font-bold text-sm text-amber-950")
 
-        with ui.column().classes("w-full p-4 border-t bg-white gap-2"):
-            with ui.button(
-                on_click=lambda: (
-                    drawer.hide(),
-                    app.storage.user.clear(),
-                    ui.navigate.to("/login"),
-                )
-            ).props("flat no-caps align=left").classes("w-full hover:bg-red-50 rounded-lg py-2 px-3"):
-                ui.label("Sair da Conta").classes("font-bold text-sm text-red-600")
+        # Rodapé do Drawer: Logout + Crédito Discreto
+        with ui.column().classes("w-full gap-4 pt-4 border-t border-slate-200 mt-auto"):
+            def fazer_logout():
+                app.storage.user.clear()
+                ui.navigate.to("/login")
+
+            with ui.row().classes("w-full items-center gap-3 p-3 rounded-xl hover:bg-red-50 text-red-600 cursor-pointer transition-all") \
+                    .on("click", fazer_logout):
+                ui.icon("logout", size="24px")
+                ui.label("Sair da Conta").classes("text-base font-bold")
+
+            # Desenvolvedor
+            ui.label("Desenvolvido por Wellington Batista Brasileiro") \
+                .classes("w-full text-center text-[11px] font-medium text-slate-400 py-1 tracking-tight opacity-75")                
 
     return drawer
 
@@ -580,8 +585,9 @@ def home_page():
                 )
 
 
+
 # ==========================================
-# 2. TELA DE DASHBOARD & CONSULTA DE BOLETOS
+# 2. TELA DE GESTÃO DE BOLETOS (REATIVIDADE & VISUAL ACESSÍVEL)
 # ==========================================
 @ui.page("/dashboard")
 def dashboard_page():
@@ -598,64 +604,129 @@ def dashboard_page():
 
     def carregar_dados():
         res = supabase.table("boletos").select("*").eq("user_id", user_id).order("data_vencimento").execute()
-        return res.data or []
+        dados = res.data or []
+        for item in dados:
+            st = str(item.get("status") or "PENDENTE").strip().upper()
+            item["status_norm"] = st
+        return dados
 
-    boletos_dados = carregar_dados()
-    hoje = datetime.now().date()
-
-    # Variáveis dos Filtros
+    # Variáveis Globais da Tela
     filtro_status = {"valor": "TODOS"}
 
-    # Métricas Big Numbers
-    total_a_vencer = sum(float(b.get("valor", 0)) for b in boletos_dados if b.get("status") == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() >= hoje)
-    cnt_a_vencer = sum(1 for b in boletos_dados if b.get("status") == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() >= hoje)
-
-    total_atrasados = sum(float(b.get("valor", 0)) for b in boletos_dados if b.get("status") == "ATRASADO" or (b.get("status") == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() < hoje))
-    cnt_atrasados = sum(1 for b in boletos_dados if b.get("status") == "ATRASADO" or (b.get("status") == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() < hoje))
-
-    total_pagos = sum(float(b.get("valor", 0)) for b in boletos_dados if b.get("status") == "PAGO")
-    cnt_pagos = sum(1 for b in boletos_dados if b.get("status") == "PAGO")
-
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-6 pb-32"):
-        ui.label("📊 Dashboard & Acompanhamento de Boletos").classes("text-2xl font-bold text-slate-800")
+        ui.label("📊 Gestão de boletos").classes("text-3xl font-black text-slate-800 tracking-tight")
 
-        # Cards Big Numbers
-        with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-3 gap-4"):
-            with ui.card().classes("p-4 bg-blue-50 border border-blue-200 rounded-xl"):
-                ui.label("Boletos a Vencer").classes("text-xs font-bold text-blue-800 uppercase")
-                ui.label(f"R$ {formatar_br(total_a_vencer)}").classes("text-2xl font-extrabold text-blue-900")
-                ui.label(f"Qtd: {cnt_a_vencer}").classes("text-xs text-blue-700")
+        # Containers reativos para Big Numbers e Gráficos
+        container_bignumbers = ui.row().classes("w-full grid grid-cols-1 sm:grid-cols-3 gap-4")
+        container_graficos = ui.column().classes("w-full gap-4")
 
-            with ui.card().classes("p-4 bg-red-50 border border-red-200 rounded-xl"):
-                ui.label("Boletos Atrasados").classes("text-xs font-bold text-red-800 uppercase")
-                ui.label(f"R$ {formatar_br(total_atrasados)}").classes("text-2xl font-extrabold text-red-900")
-                ui.label(f"Qtd: {cnt_atrasados}").classes("text-xs text-red-700")
+        # 2. Filtros de Pesquisa Recolhidos
+        with ui.expansion("🔍 Clique aqui para filtrar boletos", icon="filter_alt").classes("w-full border border-slate-300 bg-slate-50 rounded-2xl text-base font-bold text-slate-700 p-2 shadow-sm"):
+            with ui.column().classes("w-full p-2 gap-3"):
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-3 gap-3"):
+                    input_busca = ui.input("Empresa / Descrição", placeholder="Ex: Luz, Eudora...").props("outlined bg-white text-base")
+                    input_v_min = ui.number("Valor Mínimo (R$)", format="%.2f").props("outlined bg-white text-base")
+                    input_v_max = ui.number("Valor Máximo (R$)", format="%.2f").props("outlined bg-white text-base")
 
-            with ui.card().classes("p-4 bg-green-50 border border-green-200 rounded-xl"):
-                ui.label("Boletos Pagos").classes("text-xs font-bold text-green-800 uppercase")
-                ui.label(f"R$ {formatar_br(total_pagos)}").classes("text-2xl font-extrabold text-green-900")
-                ui.label(f"Qtd: {cnt_pagos}").classes("text-xs text-green-700")
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-3"):
+                    input_dt_ini = ui.input("Vencimento De").props("type=date outlined bg-white text-base")
+                    input_dt_fim = ui.input("Vencimento Até").props("type=date outlined bg-white text-base")
 
-        ui.label("📋 Consulta de Boletos").classes("text-xl font-bold text-slate-800 mt-2")
+        # 5. Botões de Filtro Congelados no Topo (Sticky Header)
+        with ui.element("div").classes("w-full sticky top-0 z-20 bg-slate-100/90 backdrop-blur-md py-3 px-1 border-b border-slate-200"):
+            ui.label("Filtrar por situação:").classes("text-xs font-bold text-slate-500 uppercase tracking-wider mb-1")
+            with ui.row().classes("w-full justify-start gap-2 flex-wrap"):
+                def set_status_filtro(st):
+                    filtro_status["valor"] = st
+                    renderizar_cards()
 
-        # Painel de Filtros de Pesquisa
-        with ui.card().classes("w-full p-4 border border-slate-200 bg-slate-50 rounded-xl gap-3"):
-            ui.label("🔍 Filtros de Pesquisa").classes("text-sm font-bold text-slate-700 uppercase tracking-wide")
-            with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-3 gap-3"):
-                input_busca = ui.input("Empresa / Descrição", placeholder="Ex: Luz, Eudora...").props("outlined bg-white dense")
-                input_v_min = ui.number("Valor Mínimo (R$)", format="%.2f").props("outlined bg-white dense")
-                input_v_max = ui.number("Valor Máximo (R$)", format="%.2f").props("outlined bg-white dense")
+                ui.button("Todos", on_click=lambda: set_status_filtro("TODOS")).classes("bg-slate-800 text-white text-sm font-bold px-4 py-2 rounded-xl")
+                ui.button("Pendentes", on_click=lambda: set_status_filtro("PENDENTE")).classes("bg-amber-600 text-white text-sm font-bold px-4 py-2 rounded-xl")
+                ui.button("Pagos", on_click=lambda: set_status_filtro("PAGO")).classes("bg-green-700 text-white text-sm font-bold px-4 py-2 rounded-xl")
+                ui.button("Atrasados", on_click=lambda: set_status_filtro("ATRASADO")).classes("bg-red-700 text-white text-sm font-bold px-4 py-2 rounded-xl")
+                ui.button("Cancelados", on_click=lambda: set_status_filtro("CANCELADO")).classes("bg-gray-600 text-white text-sm font-bold px-4 py-2 rounded-xl")
 
-            with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-3"):
-                input_dt_ini = ui.input("Vencimento De").props("type=date outlined bg-white dense")
-                input_dt_fim = ui.input("Vencimento Até").props("type=date outlined bg-white dense")
+        container_cards = ui.column().classes("w-full gap-4 mt-2")
 
-        # Botões de Filtro Rápido por Status
-        container_cards = ui.column().classes("w-full gap-3")
+        # Função de recálculo dos Big Numbers e Gráficos
+        def atualizar_dashboard(boletos_dados):
+            container_bignumbers.clear()
+            container_graficos.clear()
+            hoje = datetime.now().date()
 
+            total_a_vencer = sum(float(b.get("valor", 0)) for b in boletos_dados if b["status_norm"] == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() >= hoje)
+            cnt_a_vencer = sum(1 for b in boletos_dados if b["status_norm"] == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() >= hoje)
+
+            total_atrasados = sum(float(b.get("valor", 0)) for b in boletos_dados if b["status_norm"] == "ATRASADO" or (b["status_norm"] == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() < hoje))
+            cnt_atrasados = sum(1 for b in boletos_dados if b["status_norm"] == "ATRASADO" or (b["status_norm"] == "PENDENTE" and datetime.strptime(b["data_vencimento"], "%Y-%m-%d").date() < hoje))
+
+            total_pagos = sum(float(b.get("valor", 0)) for b in boletos_dados if b["status_norm"] == "PAGO")
+            cnt_pagos = sum(1 for b in boletos_dados if b["status_norm"] == "PAGO")
+
+            # Renderiza Big Numbers
+            with container_bignumbers:
+                with ui.card().classes("p-5 bg-blue-50 border-2 border-blue-200 rounded-2xl shadow-sm w-full"):
+                    ui.label("Boletos a Vencer").classes("text-sm font-bold text-blue-900 uppercase tracking-wider")
+                    ui.label(f"R$ {formatar_br(total_a_vencer)}").classes("text-3xl font-black text-blue-900 my-1")
+                    ui.label(f"Quantidade: {cnt_a_vencer}").classes("text-sm text-blue-800 font-semibold")
+
+                with ui.card().classes("p-5 bg-red-50 border-2 border-red-200 rounded-2xl shadow-sm w-full"):
+                    ui.label("Boletos Atrasados").classes("text-sm font-bold text-red-900 uppercase tracking-wider")
+                    ui.label(f"R$ {formatar_br(total_atrasados)}").classes("text-3xl font-black text-red-900 my-1")
+                    ui.label(f"Quantidade: {cnt_atrasados}").classes("text-sm text-red-800 font-semibold")
+
+                with ui.card().classes("p-5 bg-green-50 border-2 border-green-200 rounded-2xl shadow-sm w-full"):
+                    ui.label("Boletos Pagos").classes("text-sm font-bold text-green-900 uppercase tracking-wider")
+                    ui.label(f"R$ {formatar_br(total_pagos)}").classes("text-3xl font-black text-green-900 my-1")
+                    ui.label(f"Quantidade: {cnt_pagos}").classes("text-sm text-green-800 font-semibold")
+
+            # Renderiza Gráficos Mês a Mês
+            meses_dict = {}
+            for b in boletos_dados:
+                if b["status_norm"] == "PENDENTE":
+                    try:
+                        dt = datetime.strptime(b["data_vencimento"], "%Y-%m-%d")
+                        chave_mes = dt.strftime("%m/%Y")
+                        if chave_mes not in meses_dict:
+                            meses_dict[chave_mes] = {"qtd": 0, "valor": 0.0}
+                        meses_dict[chave_mes]["qtd"] += 1
+                        meses_dict[chave_mes]["valor"] += float(b.get("valor", 0))
+                    except Exception:
+                        pass
+
+            meses_ordenados = sorted(meses_dict.keys(), key=lambda x: datetime.strptime(x, "%m/%Y"))
+            qtdes_pendentes = [meses_dict[m]["qtd"] for m in meses_ordenados]
+            valores_pendentes = [round(meses_dict[m]["valor"], 2) for m in meses_ordenados]
+
+            if meses_ordenados:
+                with container_graficos:
+                    ui.label("📈 Evolução Mensal de Pendências").classes("text-xl font-bold text-slate-800 mt-2")
+                    with ui.grid().classes("w-full grid-cols-1 md:grid-cols-2 gap-4"):
+                        with ui.card().classes("w-full p-4 border border-slate-200 rounded-2xl bg-white shadow-sm"):
+                            ui.label("Quantidade de Boletos Pendentes").classes("text-base font-bold text-slate-700")
+                            ui.echart({
+                                "xAxis": {"type": "category", "data": meses_ordenados},
+                                "yAxis": {"type": "value"},
+                                "series": [{"data": qtdes_pendentes, "type": "bar", "color": "#f59e0b", "barWidth": "40%"}],
+                                "tooltip": {"trigger": "axis"}
+                            }).classes("h-64 w-full")
+
+                        with ui.card().classes("w-full p-4 border border-slate-200 rounded-2xl bg-white shadow-sm"):
+                            ui.label("Valor Total Pendente (R$)").classes("text-base font-bold text-slate-700")
+                            ui.echart({
+                                "xAxis": {"type": "category", "data": meses_ordenados},
+                                "yAxis": {"type": "value"},
+                                "series": [{"data": valores_pendentes, "type": "line", "color": "#d97706", "smooth": True, "areaStyle": {}}],
+                                "tooltip": {"trigger": "axis"}
+                            }).classes("h-64 w-full")
+
+        # Função de Renderização Geral dos Cards e atualização da tela
         def renderizar_cards():
             container_cards.clear()
             dados = carregar_dados()
+
+            # Recalcula e atualiza topo e gráficos
+            atualizar_dashboard(dados)
 
             # Aplicação dos filtros
             txt = (input_busca.value or "").strip().lower()
@@ -676,7 +747,7 @@ def dashboard_page():
                 match_dti = not dt_i or dt_b >= dt_i
                 match_dtf = not dt_f or dt_b <= dt_f
 
-                st = b.get("status", "PENDENTE")
+                st = b.get("status_norm", "PENDENTE")
                 match_st = (st_filtro == "TODOS") or (st == st_filtro)
 
                 if match_txt and match_vmin and match_vmax and match_dti and match_dtf and match_st:
@@ -684,24 +755,37 @@ def dashboard_page():
 
             with container_cards:
                 if not filtrados:
-                    ui.label("Nenhum boleto encontrado com os filtros aplicados.").classes("text-slate-500 italic py-4")
+                    ui.label("Nenhum boleto encontrado.").classes("text-slate-500 text-base italic py-6 text-center w-full bg-white rounded-2xl border border-slate-200")
                     return
 
                 for b in filtrados:
                     boleto_id = b["id"]
-                    status_atual = b.get("status", "PENDENTE")
+                    status_norm = b.get("status_norm", "PENDENTE")
+                    status_exibicao = status_norm.capitalize()
 
-                    # Cores dinâmicas
-                    if status_atual == "PAGO":
-                        border_color = "border-l-8 border-l-green-500"
-                    elif status_atual == "ATRASADO":
-                        border_color = "border-l-8 border-l-red-500"
-                    elif status_atual == "CANCELADO":
-                        border_color = "border-l-8 border-l-gray-400"
+                    # Definição visual por status (Ícone, Badge e Cores de Alto Contraste)
+                    if status_norm == "PAGO":
+                        border_color = "border-l-8 border-l-green-600"
+                        badge_bg = "bg-green-100 text-green-900 border-green-300"
+                        status_icon = "check_circle"
+                        status_texto = "Pago"
+                    elif status_norm == "ATRASADO":
+                        border_color = "border-l-8 border-l-red-600"
+                        badge_bg = "bg-red-100 text-red-900 border-red-300"
+                        status_icon = "warning"
+                        status_texto = "Atrasado"
+                    elif status_norm == "CANCELADO":
+                        border_color = "border-l-8 border-l-gray-500"
+                        badge_bg = "bg-gray-200 text-gray-800 border-gray-300"
+                        status_icon = "cancel"
+                        status_texto = "Cancelado"
                     else:
                         border_color = "border-l-8 border-l-amber-500"
+                        badge_bg = "bg-amber-100 text-amber-900 border-amber-300"
+                        status_icon = "schedule"
+                        status_texto = "Pendente"
 
-                    # Cálculo do Lembrete Exibido no Card
+                    # Lembrete
                     info_alerta = "Sem lembrete ativo"
                     if b.get("tem_lembrete"):
                         ant = b.get("antecedencia_dias", 0)
@@ -713,42 +797,55 @@ def dashboard_page():
                         except Exception:
                             info_alerta = f"🔔 Alerta: {ant} dia(s) antes às {hor}"
 
-                    with ui.card().classes(f"w-full p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex-col gap-3 {border_color}"):
+                    # Layout do Card com Acessibilidade Avançada
+                    with ui.card().classes(f"w-full p-5 bg-white border border-slate-200 rounded-2xl shadow-sm flex-col gap-3 {border_color}"):
+                        
+                        # Topo do Card: Badge de Status Bem Visível
+                        with ui.row().classes("w-full justify-between items-center"):
+                            with ui.row().classes(f"items-center gap-1.5 px-3 py-1 rounded-xl border text-sm font-black {badge_bg}"):
+                                ui.icon(status_icon, size="20px")
+                                ui.label(f"Situação: {status_texto}")
+
+                            ui.label(info_alerta).classes("text-xs text-purple-900 font-bold bg-purple-50 px-3 py-1 rounded-lg border border-purple-200")
+
+                        ui.separator().classes("my-0.5")
+
                         with ui.row().classes("w-full justify-between items-start gap-2"):
-                            with ui.column().classes("gap-0 flex-1"):
-                                ui.label(b.get("empresa")).classes("font-black text-lg text-slate-800")
+                            with ui.column().classes("gap-1 flex-1"):
+                                ui.label(b.get("empresa")).classes("font-black text-2xl text-slate-900")
                                 cat_nome = categorias_list.get(b.get("categoria_id"), "Sem Categoria")
-                                ui.label(f"📁 Categoria: {cat_nome}").classes("text-xs text-slate-500 font-medium")
+                                ui.label(f"📁 Categoria: {cat_nome}").classes("text-base text-slate-700 font-semibold")
 
                             with ui.column().classes("items-end gap-1"):
-                                ui.label(f"R$ {formatar_br(b.get('valor'))}").classes("font-black text-xl text-slate-900")
-                                ui.label(f"🗓 Vencimento: {formatar_data_br(b.get('data_vencimento'))}").classes("text-xs font-bold text-slate-600")
+                                ui.label(f"R$ {formatar_br(b.get('valor'))}").classes("font-black text-2xl text-slate-900")
+                                ui.label(f"🗓 Vencimento: {formatar_data_br(b.get('data_vencimento'))}").classes("text-base font-extrabold text-slate-800")
 
-                        ui.separator()
+                        ui.separator().classes("my-0.5")
 
-                        with ui.row().classes("w-full justify-between items-center gap-2 flex-wrap"):
-                            ui.label(info_alerta).classes("text-xs text-purple-700 font-bold bg-purple-50 px-2 py-1 rounded-md border border-purple-200")
-
+                        # Rodapé do Card: Alteração de Status e Ações
+                        with ui.row().classes("w-full justify-between items-center gap-3 flex-wrap"):
                             with ui.row().classes("items-center gap-2"):
-                                # Alteração rápida de Status diretamente no Card
+                                ui.label("Alterar para:").classes("text-sm font-bold text-slate-700")
+
                                 def atualizar_status(e, bid=boleto_id):
-                                    supabase.table("boletos").update({"status": e.value}).eq("id", bid).execute()
-                                    ui.notify(f"Status atualizado para {e.value}!", color="positive")
+                                    val_salvar = str(e.value).upper()
+                                    supabase.table("boletos").update({"status": val_salvar}).eq("id", bid).execute()
+                                    ui.notify(f"Situação alterada para {e.value}!", color="positive")
                                     renderizar_cards()
 
                                 ui.select(
-                                    ["PENDENTE", "PAGO", "ATRASADO", "CANCELADO"],
-                                    value=status_atual,
+                                    ["Pendente", "Pago", "Atrasado", "Cancelado"],
+                                    value=status_exibicao,
                                     on_change=atualizar_status
-                                ).props("dense outlined").classes("w-36 text-xs")
+                                ).props("dense outlined text-base").classes("w-40 font-bold")
 
-                                # Modal de Edição
+                            with ui.row().classes("items-center gap-1"):
                                 def abrir_modal_edicao(boleto=b):
-                                    with ui.dialog() as dlg, ui.card().classes("w-full max-w-md p-5 gap-3"):
-                                        ui.label("Editar Boleto").classes("text-lg font-bold text-slate-800")
-                                        e_emp = ui.input("Empresa", value=boleto["empresa"]).props("outlined dense")
-                                        e_val = ui.number("Valor (R$)", value=boleto["valor"], format="%.2f").props("outlined dense")
-                                        e_venc = ui.input("Vencimento", value=boleto["data_vencimento"]).props("type=date outlined dense")
+                                    with ui.dialog() as dlg, ui.card().classes("w-full max-w-md p-6 gap-4 rounded-2xl"):
+                                        ui.label("Editar Boleto").classes("text-xl font-bold text-slate-800")
+                                        e_emp = ui.input("Empresa", value=boleto["empresa"]).props("outlined text-base")
+                                        e_val = ui.number("Valor (R$)", value=boleto["valor"], format="%.2f").props("outlined text-base")
+                                        e_venc = ui.input("Vencimento", value=boleto["data_vencimento"]).props("type=date outlined text-base")
 
                                         def salvar_edicao():
                                             supabase.table("boletos").update({
@@ -757,45 +854,32 @@ def dashboard_page():
                                                 "data_vencimento": e_venc.value,
                                             }).eq("id", boleto["id"]).execute()
                                             dlg.close()
-                                            ui.notify("Boleto alterado!", color="positive")
+                                            ui.notify("Boleto alterado com sucesso!", color="positive")
                                             renderizar_cards()
 
-                                        with ui.row().classes("w-full justify-end gap-2 mt-2"):
-                                            ui.button("Cancelar", on_click=dlg.close).props("flat")
-                                            ui.button("Salvar", on_click=salvar_edicao).classes("bg-blue-600 text-white font-bold")
+                                        with ui.row().classes("w-full justify-end gap-3 mt-2"):
+                                            ui.button("Cancelar", on_click=dlg.close).props("flat text-base")
+                                            ui.button("Salvar", on_click=salvar_edicao).classes("bg-blue-600 text-white font-bold px-4 py-2 rounded-xl")
                                     dlg.open()
 
-                                # Confirmar Exclusão
                                 def confirmar_exclusao(bid=boleto_id, nome=b.get("empresa")):
-                                    with ui.dialog() as dlg_del, ui.card().classes("p-5 max-w-sm gap-3"):
-                                        ui.label("Confirmar Exclusão").classes("text-lg font-bold text-red-700")
-                                        ui.label(f"Tem certeza que deseja excluir o boleto '{nome}'?").classes("text-sm text-slate-600")
+                                    with ui.dialog() as dlg_del, ui.card().classes("p-6 max-w-sm gap-4 rounded-2xl"):
+                                        ui.label("Confirmar Exclusão").classes("text-xl font-bold text-red-700")
+                                        ui.label(f"Deseja realmente apagar o boleto da '{nome}'?").classes("text-base text-slate-700")
 
                                         def excluir():
                                             supabase.table("boletos").delete().eq("id", bid).execute()
                                             dlg_del.close()
-                                            ui.notify("Boleto excluído com sucesso!", color="warning")
+                                            ui.notify("Boleto excluído!", color="warning")
                                             renderizar_cards()
 
-                                        with ui.row().classes("w-full justify-end gap-2 mt-2"):
-                                            ui.button("Cancelar", on_click=dlg_del.close).props("flat")
-                                            ui.button("Excluir", on_click=excluir).classes("bg-red-600 text-white font-bold")
+                                        with ui.row().classes("w-full justify-end gap-3 mt-2"):
+                                            ui.button("Cancelar", on_click=dlg_del.close).props("flat text-base")
+                                            ui.button("Excluir", on_click=excluir).classes("bg-red-600 text-white font-bold px-4 py-2 rounded-xl")
                                     dlg_del.open()
 
-                                ui.button(icon="edit", on_click=abrir_modal_edicao).props("flat round dense color=primary")
-                                ui.button(icon="delete", on_click=confirmar_exclusao).props("flat round dense color=negative")
-
-        # Botões Guia para Alternância
-        with ui.row().classes("w-full justify-start gap-2 flex-wrap my-1"):
-            def set_status_filtro(st):
-                filtro_status["valor"] = st
-                renderizar_cards()
-
-            ui.button("Todos", on_click=lambda: set_status_filtro("TODOS")).classes("bg-slate-700 text-white text-xs font-bold")
-            ui.button("Pendentes", on_click=lambda: set_status_filtro("PENDENTE")).classes("bg-amber-600 text-white text-xs font-bold")
-            ui.button("Pagos", on_click=lambda: set_status_filtro("PAGO")).classes("bg-green-600 text-white text-xs font-bold")
-            ui.button("Atrasados", on_click=lambda: set_status_filtro("ATRASADO")).classes("bg-red-600 text-white text-xs font-bold")
-            ui.button("Cancelados", on_click=lambda: set_status_filtro("CANCELADO")).classes("bg-gray-600 text-white text-xs font-bold")
+                                ui.button("Editar", icon="edit", on_click=abrir_modal_edicao).props("flat color=primary text-base")
+                                ui.button("Excluir", icon="delete", on_click=confirmar_exclusao).props("flat color=negative text-base")
 
         # Eventos para Reatividade nos Filtros
         input_busca.on("update:model-value", renderizar_cards)
@@ -804,7 +888,7 @@ def dashboard_page():
         input_dt_ini.on("update:model-value", renderizar_cards)
         input_dt_fim.on("update:model-value", renderizar_cards)
 
-        # Renderização inicial
+        # Renderização Inicial
         renderizar_cards()
 
 
