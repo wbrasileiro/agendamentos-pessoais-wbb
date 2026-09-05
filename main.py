@@ -132,50 +132,104 @@ def enviar_notificacao_email(solicitante_email, dispositivo, localizacao):
     ).start()
 
 
-# --- LAYOUT BASE & NAVEGAÇÃO ---
+# ==========================================
+# MENU - LAYOUT BASE & NAVEGAÇÃO REESTRUTURADA
+# ==========================================
 def menu_drawer():
     user_email = app.storage.user.get("email", "")
 
     with ui.left_drawer(value=False).classes(
-        "bg-slate-50 text-slate-800 p-0 flex flex-col justify-between w-64 border-r shadow-lg"
+        "bg-slate-50 text-slate-800 p-0 flex flex-col justify-between w-72 border-r border-slate-200 shadow-xl"
     ) as drawer:
 
         def navegar(rota):
             drawer.hide()
             ui.navigate.to(rota)
 
-        with ui.column().classes("w-full p-5 border-b bg-white gap-1"):
-            with ui.row().classes("items-center gap-2"):
-                ui.icon("event_note", size="28px").classes(
-                    "text-blue-700 font-bold"
-                )
-                ui.label("Agendamentos").classes("text-xl font-black")
-            ui.label(user_email if user_email else "Minha Conta").classes(
-                "text-xs text-slate-500 truncate"
-            )
+        # TOPO DO MENU - PERFIL E HEADER
+        with ui.column().classes("w-full p-5 border-b border-slate-200 bg-white gap-2"):
+            with ui.row().classes("items-center gap-3"):
+                with ui.element("div").classes("p-2 bg-blue-100 rounded-xl text-blue-700 flex items-center justify-center"):
+                    ui.icon("space_dashboard", size="24px")
+                with ui.column().classes("gap-0"):
+                    ui.label("Sistema de Gestão").classes("text-base font-black text-slate-900 leading-tight")
+                    ui.label("Painel Pessoal").classes("text-xs font-semibold text-slate-500")
 
-        with ui.column().classes("w-full p-4 gap-2 flex-1"):
-            with ui.button(on_click=lambda: navegar("/")).props(
-                "flat no-caps align=left"
-            ).classes("w-full hover:bg-slate-200 rounded-lg py-2 px-3"):
-                ui.label("📅 Meus Boletos e Alertas").classes(
-                    "font-bold text-sm"
+            with ui.row().classes("items-center gap-2 mt-1 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 w-full"):
+                ui.icon("account_circle", size="18px").classes("text-slate-500")
+                ui.label(user_email if user_email else "Minha Conta").classes(
+                    "text-xs font-bold text-slate-700 truncate flex-1"
                 )
 
-            # MENU EXCLUSIVO DO ADMIN
+        # CORPO DO MENU - SEÇÕES REESTRUTURADAS
+        with ui.column().classes("w-full p-4 gap-4 flex-1 overflow-y-auto"):
+            
+            # --- SEÇÃO 1: LANÇAMENTOS ---
+            with ui.column().classes("w-full gap-1"):
+                ui.label("LANÇAMENTOS").classes("text-[11px] font-black tracking-wider text-slate-400 px-3 my-1 uppercase")
+                
+                with ui.button(on_click=lambda: navegar("/dashboard")).props("flat no-caps align=left").classes(
+                    "w-full hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl py-2 px-3 transition-all"
+                ):
+                    with ui.row().classes("items-center gap-3 w-full"):
+                        ui.icon("payments", size="20px").classes("text-blue-600")
+                        ui.label("Gestão Financeira").classes("font-bold text-sm")
+
+                with ui.button(on_click=lambda: navegar("/")).props("flat no-caps align=left").classes(
+                    "w-full hover:bg-blue-50 text-slate-700 hover:text-blue-700 rounded-xl py-2 px-3 transition-all"
+                ):
+                    with ui.row().classes("items-center gap-3 w-full"):
+                        ui.icon("add_card", size="20px").classes("text-blue-600")
+                        ui.label("Cadastro").classes("font-bold text-sm")
+
+            # --- SEÇÃO 2: UTILITÁRIOS ---
+            with ui.column().classes("w-full gap-1"):
+                ui.label("UTILITÁRIOS").classes("text-[11px] font-black tracking-wider text-slate-400 px-3 my-1 uppercase")
+                
+                # Lembretes
+                with ui.button(on_click=lambda: navegar("/lembretes")).props("flat no-caps align=left").classes(
+                    "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
+                ):
+                    with ui.row().classes("items-center justify-between w-full"):
+                        with ui.row().classes("items-center gap-3"):
+                            ui.icon("notifications_active", size="20px").classes("text-purple-600")
+                            ui.label("Lembretes").classes("font-bold text-sm")
+                        ui.label("Em breve").classes("text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full")
+
+                # Tarefas
+                with ui.button(on_click=lambda: navegar("/tarefas")).props("flat no-caps align=left").classes(
+                    "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
+                ):
+                    with ui.row().classes("items-center justify-between w-full"):
+                        with ui.row().classes("items-center gap-3"):
+                            ui.icon("check_box", size="20px").classes("text-purple-600")
+                            ui.label("Tarefas").classes("font-bold text-sm")
+                        ui.label("Em breve").classes("text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full")
+
+                # Anotações
+                with ui.button(on_click=lambda: navegar("/anotacoes")).props("flat no-caps align=left").classes(
+                    "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
+                ):
+                    with ui.row().classes("items-center justify-between w-full"):
+                        with ui.row().classes("items-center gap-3"):
+                            ui.icon("sticky_note_2", size="20px").classes("text-purple-600")
+                            ui.label("Anotações").classes("font-bold text-sm")
+                        ui.label("Em breve").classes("text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full")
+
+            # --- SEÇÃO 3: ADMINISTRAÇÃO ---
             if app.storage.user.get("is_admin", False) or user_email == ADMIN_EMAIL:
-                ui.separator().classes("my-2")
-                ui.label("ADMINISTRAÇÃO").classes(
-                    "text-[10px] font-bold text-amber-600 px-3"
-                )
-                with ui.button(on_click=lambda: navegar("/admin")).props(
-                    "flat no-caps align=left"
-                ).classes("w-full hover:bg-amber-100/50 rounded-lg py-2 px-3"):
-                    ui.label("⚙️ Painel de Manutenção").classes(
-                        "font-bold text-sm text-amber-950"
-                    )
+                with ui.column().classes("w-full gap-1"):
+                    ui.label("ADMINISTRAÇÃO").classes("text-[11px] font-black tracking-wider text-amber-600 px-3 my-1 uppercase")
+                    
+                    with ui.button(on_click=lambda: navegar("/admin")).props("flat no-caps align=left").classes(
+                        "w-full hover:bg-amber-100/60 text-slate-700 hover:text-amber-900 rounded-xl py-2 px-3 transition-all"
+                    ):
+                        with ui.row().classes("items-center gap-3 w-full"):
+                            ui.icon("admin_panel_settings", size="20px").classes("text-amber-600")
+                            ui.label("Manutenção (Admin)").classes("font-bold text-sm")
 
-        with ui.column().classes("w-full p-4 border-t bg-white gap-2"):
+        # RODAPÉ DO MENU - SAIR DA CONTA
+        with ui.column().classes("w-full p-4 border-t border-slate-200 bg-white"):
             with ui.button(
                 on_click=lambda: (
                     drawer.hide(),
@@ -183,11 +237,11 @@ def menu_drawer():
                     ui.navigate.to("/login"),
                 )
             ).props("flat no-caps align=left").classes(
-                "w-full hover:bg-red-50 rounded-lg py-2 px-3"
+                "w-full bg-red-50 hover:bg-red-100 text-red-700 rounded-xl py-2.5 px-3 transition-all border border-red-200"
             ):
-                ui.label("Sair da Conta").classes(
-                    "font-bold text-sm text-red-600"
-                )
+                with ui.row().classes("items-center gap-3 w-full justify-center"):
+                    ui.icon("logout", size="20px").classes("text-red-600")
+                    ui.label("Sair da conta").classes("font-black text-sm")
 
     return drawer
 
@@ -195,13 +249,17 @@ def menu_drawer():
 def cabecalho_app(drawer):
     user_email = app.storage.user.get("email", "Usuário")
     with ui.header().classes(
-        "bg-blue-900 text-white justify-between items-center p-3 w-full"
+        "bg-slate-900 text-white justify-between items-center px-4 py-2.5 w-full shadow-md"
     ):
-        ui.button(icon="menu", on_click=drawer.toggle).props("flat color=white")
-        ui.label("Agendamentos Pessoais").classes("text-lg font-bold")
-        ui.label(user_email.split("@")[0]).classes(
-            "text-xs bg-blue-700 px-2 py-1 rounded"
-        )
+        with ui.row().classes("items-center gap-2"):
+            ui.button(icon="menu", on_click=drawer.toggle).props("flat round color=white")
+            ui.label("Gestão Integrada").classes("text-lg font-black tracking-tight")
+        
+        with ui.row().classes("items-center gap-2 bg-slate-800/80 px-3 py-1 rounded-xl border border-slate-700"):
+            ui.icon("person", size="18px").classes("text-slate-300")
+            ui.label(user_email.split("@")[0]).classes(
+                "text-xs font-bold text-slate-200"
+            )
 
 
 # --- TELA DE LOGIN & SOLICITAÇÃO ---
@@ -573,7 +631,7 @@ def menu_drawer():
             with ui.button(on_click=lambda: navegar("/")).props("flat no-caps align=left").classes(
                 "w-full hover:bg-slate-200 rounded-lg py-2 px-3"
             ):
-                ui.label("➕ Cadastrar Boleto").classes("font-bold text-sm")
+                ui.label("➕ Cadastrar").classes("font-bold text-sm")
 
             with ui.button(on_click=lambda: navegar("/dashboard")).props("flat no-caps align=left").classes(
                 "w-full hover:bg-slate-200 rounded-lg py-2 px-3"
@@ -610,7 +668,7 @@ def cabecalho_app(drawer):
 
 
 # ==========================================
-# 1. TELA DE CADASTRO DE BOLETOS
+# 1. TELA DE CADASTRO
 # ==========================================
 @ui.page("/")
 def home_page():
