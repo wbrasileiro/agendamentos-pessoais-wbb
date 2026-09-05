@@ -35,6 +35,8 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASS = os.getenv("GMAIL_APP_PASS")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -43,6 +45,308 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 
 PORT = int(os.environ.get("PORT", 8080))
 REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"http://localhost:{PORT}/oauth2callback")
+
+
+# --- FUNÇÕES AUXILIARES ---
+def obter_hora_brasilia():
+    return datetime.now(ZoneInfo("America/Sao_Paulo"))
+
+
+def email_valido(email_str: str) -> bool:
+    return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email_str.strip()))
+
+
+def formatar_br(valor) -> str:
+    try:
+        val = float(valor or 0)
+        return (
+            f"{val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        )
+    except (ValueError, TypeError):
+        return "0,00"
+
+
+# --- NOTIFICAÇÕES (TELEGRAM & E-MAIL) ---
+def enviar_notificacao_telegram(
+    email_solicitante: str, dispositivo: str, localizacao: str
+):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    mensagem = (
+        f"🚨 <b>SOLICITAÇÃO DE ACESSO - AGENDAMENTOS</b>\n\n"
+        f"📧 <b>E-mail:</b> {email_solicitante}\n"
+        f"📱 <b>Dispositivo:</b> {dispositivo[:60]}\n"
+        f"📍 <b>Localização:</b> {localizacao}"
+    )
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        requests.post(
+            url,
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": mensagem,
+                "parse_mode": "HTML",
+            },
+            timeout=5,
+        )
+    except Exception as e:
+        print(f"Erro Telegram: {e}")
+
+
+def _enviar_email_worker(solicitante_email, dispositivo, localizacao):
+    try:
+        data_hora_br = obter_hora_brasilia().strftime("%d/%m/%Y às %H:%M:%S")
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = (
+            f"Agendamentos Pessoais - Solicitação: {solicitante_email}"
+        )
+        msg["From"] = f"Agendamentos Pessoais <{GMAIL_USER}>"
+        msg["To"] = ADMIN_EMAIL
+
+        corpo_html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>🔔 Nova Solicitação de Acesso</h2>
+            <ul>
+            <li><b>E-mail:</b> {solicitante_email}</li>
+            <li><b>Data/Hora:</b> {data_hora_br}</li>
+            <li><b>Localização:</b> {localizacao}</li>
+            <li><b>Dispositivo:</b> {dispositivo}</li>
+            </ul>
+        </body>
+        </html>
+        """
+        msg.attach(MIMEText(corpo_html, "html"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_USER, GMAIL_APP_PASS)
+            server.sendmail(GMAIL_USER, ADMIN_EMAIL, msg.as_string())
+    except Exception as e:
+        print(f"Erro E-mail: {e}")
+
+
+def enviar_notificacao_email(solicitante_email, dispositivo, localizacao):
+    threading.Thread(
+        target=_enviar_email_worker,
+        args=(solicitante_email, dispositivo, localizacao),
+        daemon=True,
+    ).start()
+
+
+# --- LAYOUT BASE & NAVEGAÇÃO ---
+def menu_drawer():
+    user_email = app.storage.user.get("email", "")
+
+    with ui.left_drawer(value=False).classes(
+        "bg-slate-50 text-slate-800 p-0 flex flex-col justify-between w-64 border-r shadow-lg"
+    ) as drawer:
+
+        def navegar(rota):
+            drawer.hide()
+            ui.navigate.to(rota)
+
+        with ui.column().classes("w-full p-5 border-b bg-white gap-1"):
+            with ui.row().classes("items-center gap-2"):
+                ui.icon("event_note", size="28px").classes(
+                    "text-blue-700 font-bold"
+                )
+                ui.label("Agendamentos").classes("text-xl font-black")
+            ui.label(user_email if user_email else "Minha Conta").classes(
+                "text-xs text-slate-500 truncate"
+            )
+
+        with ui.column().classes("w-full p-4 gap-2 flex-1"):
+            with ui.button(on_click=lambda: navegar("/")).props(
+                "flat no-caps align=left"
+            ).classes("w-full hover:bg-slate-200 rounded-lg py-2 px-3"):
+                ui.label("📅 Meus Boletos e Alertas").classes(
+                    "font-bold text-sm"
+                )
+
+            # MENU EXCLUSIVO DO ADMIN
+            if app.storage.user.get("is_admin", False) or user_email == ADMIN_EMAIL:
+                ui.separator().classes("my-2")
+                ui.label("ADMINISTRAÇÃO").classes(
+                    "text-[10px] font-bold text-amber-600 px-3"
+                )
+                with ui.button(on_click=lambda: navegar("/admin")).props(
+                    "flat no-caps align=left"
+                ).classes("w-full hover:bg-amber-100/50 rounded-lg py-2 px-3"):
+                    ui.label("⚙️ Painel de Manutenção").classes(
+                        "font-bold text-sm text-amber-950"
+                    )
+
+        with ui.column().classes("w-full p-4 border-t bg-white gap-2"):
+            with ui.button(
+                on_click=lambda: (
+                    drawer.hide(),
+                    app.storage.user.clear(),
+                    ui.navigate.to("/login"),
+                )
+            ).props("flat no-caps align=left").classes(
+                "w-full hover:bg-red-50 rounded-lg py-2 px-3"
+            ):
+                ui.label("Sair da Conta").classes(
+                    "font-bold text-sm text-red-600"
+                )
+
+    return drawer
+
+
+def cabecalho_app(drawer):
+    user_email = app.storage.user.get("email", "Usuário")
+    with ui.header().classes(
+        "bg-blue-900 text-white justify-between items-center p-3 w-full"
+    ):
+        ui.button(icon="menu", on_click=drawer.toggle).props("flat color=white")
+        ui.label("Agendamentos Pessoais").classes("text-lg font-bold")
+        ui.label(user_email.split("@")[0]).classes(
+            "text-xs bg-blue-700 px-2 py-1 rounded"
+        )
+
+
+# --- TELA DE LOGIN & SOLICITAÇÃO ---
+@ui.page("/login")
+def login_page():
+    def abrir_modal_solicitacao():
+        with ui.dialog() as dialog, ui.card().classes("w-full max-w-sm p-4"):
+            ui.label("Solicitar Acesso").classes(
+                "text-xl font-bold text-gray-800 mb-2"
+            )
+            solicita_email = (
+                ui.input("E-mail").props("outlined").classes("w-full mb-2")
+            )
+            solicita_senha = (
+                ui.input(
+                    "Senha desejada", password=True, password_toggle_button=True
+                )
+                .props("outlined")
+                .classes("w-full mb-4")
+            )
+
+            async def processar_solicitacao():
+                email_txt = (solicita_email.value or "").strip().lower()
+                senha_txt = (solicita_senha.value or "").strip()
+
+                if not email_valido(email_txt) or not senha_txt:
+                    ui.notify(
+                        "Preencha os campos corretamente!", color="warning"
+                    )
+                    return
+
+                user_agent = str(
+                    ui.context.client.environ.get(
+                        "HTTP_USER_AGENT", "Dispositivo Móvel"
+                    )
+                )[:150]
+                loc_text = "Não informada"
+
+                try:
+                    ip_cliente = ui.context.client.environ.get(
+                        "REMOTE_ADDR", ""
+                    )
+                    ip_data = requests.get(
+                        f"https://ipapi.co/{ip_cliente}/json/", timeout=2
+                    ).json()
+                    loc_text = (
+                        f"{ip_data.get('city')}, {ip_data.get('region')}"
+                    )
+                except Exception:
+                    pass
+
+                dialog.close()
+
+                # Salva solicitação no Supabase
+                try:
+                    supabase.table("solicitacoes_acesso").insert({
+                        "created_at": obter_hora_brasilia().isoformat(),
+                        "email": email_txt,
+                        "senha_temporaria": senha_txt,
+                        "dispositivo": user_agent,
+                        "localizacao": loc_text,
+                    }).execute()
+                except Exception as e:
+                    print(f"Erro Supabase: {e}")
+
+                # Dispara Notificações
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        enviar_notificacao_email,
+                        email_txt,
+                        user_agent,
+                        loc_text,
+                    )
+                )
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        enviar_notificacao_telegram,
+                        email_txt,
+                        user_agent,
+                        loc_text,
+                    )
+                )
+
+                ui.notify(
+                    "Solicitação enviada com sucesso ao Administrador!",
+                    color="positive",
+                )
+
+            ui.button("ENVIAR SOLICITAÇÃO", on_click=processar_solicitacao).classes(
+                "w-full bg-blue-600 text-white font-bold mb-2"
+            )
+            ui.button("CANCELAR", on_click=dialog.close).props("flat").classes(
+                "w-full text-gray-600"
+            )
+
+        dialog.open()
+
+    with ui.card().classes(
+        "w-11/12 max-w-sm absolute-center p-6 shadow-xl rounded-xl"
+    ):
+        ui.label("Agendamentos Pessoais").classes(
+            "text-2xl font-bold text-blue-800 text-center w-full mb-4"
+        )
+        email = ui.input("E-mail").props("outlined").classes("w-full mb-2")
+        password = (
+            ui.input("Senha", password=True, password_toggle_button=True)
+            .props("outlined")
+            .classes("w-full mb-4")
+        )
+
+        def try_login():
+            email_val = email.value.strip().lower() if email.value else ""
+            pwd_val = password.value.strip() if password.value else ""
+
+            res = (
+                supabase.table("perfis_usuarios")
+                .select("*")
+                .eq("email", email_val)
+                .execute()
+            )
+            users = res.data or []
+
+            if users and users[0].get("senha") == pwd_val:
+                if not users[0].get("ativo", True):
+                    ui.notify(
+                        "Usuário inativo! Fale com o administrador.",
+                        color="negative",
+                    )
+                    return
+                app.storage.user["user_id"] = users[0]["id"]
+                app.storage.user["email"] = users[0]["email"]
+                app.storage.user["is_admin"] = users[0].get("is_admin", False) # <--- ADICIONE ESTA LINHA
+                ui.navigate.to("/")
+            else:
+                ui.notify("E-mail ou senha incorretos!", color="negative")
+
+        ui.button("ENTRAR", on_click=try_login).classes(
+            "w-full bg-blue-600 text-white font-bold mb-3"
+        )
+        ui.separator().classes("my-2")
+        ui.button(
+            "SOLICITAR ACESSO", on_click=abrir_modal_solicitacao
+        ).props("flat dense").classes(
+            "w-full text-blue-500 font-medium text-xs mt-2"
+        )
 
 # Dicionário em memória para armazenar os tokens das sessões
 user_tokens = {}
@@ -284,20 +588,15 @@ def menu_drawer():
                 ):
                     ui.label("⚙️ Painel de Manutenção").classes("font-bold text-sm text-amber-950")
 
-        # Rodapé do Drawer: Logout + Crédito Discreto
-        with ui.column().classes("w-full gap-4 pt-4 border-t border-slate-200 mt-auto"):
-            def fazer_logout():
-                app.storage.user.clear()
-                ui.navigate.to("/login")
-
-            with ui.row().classes("w-full items-center gap-3 p-3 rounded-xl hover:bg-red-50 text-red-600 cursor-pointer transition-all") \
-                    .on("click", fazer_logout):
-                ui.icon("logout", size="24px")
-                ui.label("Sair da Conta").classes("text-base font-bold")
-
-            # Desenvolvedor
-            ui.label("Desenvolvido por Wellington Batista Brasileiro") \
-                .classes("w-full text-center text-[11px] font-medium text-slate-400 py-1 tracking-tight opacity-75")                
+        with ui.column().classes("w-full p-4 border-t bg-white gap-2"):
+            with ui.button(
+                on_click=lambda: (
+                    drawer.hide(),
+                    app.storage.user.clear(),
+                    ui.navigate.to("/login"),
+                )
+            ).props("flat no-caps align=left").classes("w-full hover:bg-red-50 rounded-lg py-2 px-3"):
+                ui.label("Sair da Conta").classes("font-bold text-sm text-red-600")
 
     return drawer
 
@@ -308,93 +607,6 @@ def cabecalho_app(drawer):
         ui.button(icon="menu", on_click=drawer.toggle).props("flat color=white")
         ui.label("Agendamentos Pessoais").classes("text-lg font-bold")
         ui.label(user_email.split("@")[0]).classes("text-xs bg-blue-700 px-2 py-1 rounded")
-
-
-# --- TELA DE LOGIN ---
-@ui.page("/login")
-def login_page():
-    def abrir_modal_solicitacao():
-        with ui.dialog() as dialog, ui.card().classes("w-full max-w-sm p-4"):
-            ui.label("Solicitar Acesso").classes("text-xl font-bold text-gray-800 mb-1")
-            ui.label(
-                "ℹ️ Seu número de telefone e e-mail serão utilizados para validação de acesso e notificações."
-            ).classes("text-xs text-blue-800 bg-blue-50 p-2 rounded mb-3 border border-blue-200 font-medium")
-
-            solicita_email = ui.input("E-mail").props("outlined").classes("w-full mb-2")
-            solicita_telefone = ui.input("Telefone / WhatsApp (com DDD)").props("outlined").classes("w-full mb-2")
-            solicita_senha = ui.input("Senha desejada", password=True, password_toggle_button=True).props("outlined").classes("w-full mb-4")
-
-            async def processar_solicitacao():
-                email_txt = (solicita_email.value or "").strip().lower()
-                telefone_txt = (solicita_telefone.value or "").strip()
-                senha_txt = (solicita_senha.value or "").strip()
-
-                if not email_valido(email_txt) or not telefone_txt or not senha_txt:
-                    ui.notify("Preencha todos os campos corretamente!", color="warning")
-                    return
-
-                e_valido, msg_erro = validar_telefone(telefone_txt)
-                if not e_valido:
-                    ui.notify(msg_erro, color="negative", size="lg")
-                    return
-
-                user_agent = str(ui.context.client.environ.get("HTTP_USER_AGENT", "Dispositivo Móvel"))[:150]
-                loc_text = "Não informada"
-
-                try:
-                    ip_cliente = ui.context.client.environ.get("REMOTE_ADDR", "")
-                    ip_data = requests.get(f"https://ipapi.co/{ip_cliente}/json/", timeout=2).json()
-                    loc_text = f"{ip_data.get('city')}, {ip_data.get('region')}"
-                except Exception:
-                    pass
-
-                try:
-                    supabase.table("solicitacoes_acesso").insert({
-                        "created_at": obter_hora_brasilia().isoformat(),
-                        "email": email_txt,
-                        "telefone": telefone_txt,
-                        "senha_temporaria": senha_txt,
-                        "dispositivo": user_agent,
-                        "localizacao": loc_text,
-                    }).execute()
-
-                    dialog.close()
-                    asyncio.create_task(asyncio.to_thread(enviar_notificacao_email, email_txt, telefone_txt, user_agent, loc_text))
-                    ui.notify("Solicitação enviada com sucesso ao Administrador!", color="positive")
-                except Exception as e:
-                    ui.notify(f"Erro ao salvar solicitação: {e}", color="negative")
-
-            ui.button("ENVIAR SOLICITAÇÃO", on_click=processar_solicitacao).classes("w-full bg-blue-600 text-white font-bold mb-2")
-            ui.button("CANCELAR", on_click=dialog.close).props("flat").classes("w-full text-gray-600")
-
-        dialog.open()
-
-    with ui.card().classes("w-11/12 max-w-sm absolute-center p-6 shadow-xl rounded-xl"):
-        ui.label("Agendamentos Pessoais").classes("text-2xl font-bold text-blue-800 text-center w-full mb-4")
-        email = ui.input("E-mail").props("outlined").classes("w-full mb-2")
-        password = ui.input("Senha", password=True, password_toggle_button=True).props("outlined").classes("w-full mb-4")
-
-        def try_login():
-            email_val = email.value.strip().lower() if email.value else ""
-            pwd_val = password.value.strip() if password.value else ""
-
-            res = supabase.table("perfis_usuarios").select("*").eq("email", email_val).execute()
-            users = res.data or []
-
-            if users and users[0].get("senha") == pwd_val:
-                if not users[0].get("ativo", True):
-                    ui.notify("Usuário inativo! Fale com o administrador.", color="negative")
-                    return
-                app.storage.user["user_id"] = users[0]["id"]
-                app.storage.user["email"] = users[0]["email"]
-                app.storage.user["is_admin"] = users[0].get("is_admin", False)
-                ui.navigate.to("/")
-            else:
-                ui.notify("E-mail ou senha incorretos!", color="negative")
-
-        ui.button("ENTRAR", on_click=try_login).classes("w-full bg-blue-600 text-white font-bold mb-3")
-        ui.separator().classes("my-2")
-        ui.button("SOLICITAR ACESSO", on_click=abrir_modal_solicitacao).props("flat dense").classes("w-full text-blue-500 font-medium text-xs mt-2")
 
 
 # ==========================================
@@ -410,17 +622,21 @@ def home_page():
     cabecalho_app(drawer)
     user_id = app.storage.user.get("user_id")
 
-    # Busca categoria "Boleto" no banco sem exibir o campo visualmente
-    categoria_boleto_id = None
+    # Busca dinamicamente todas as categorias do banco de dados
+    opcoes_categorias = {}
+    categoria_padrao_id = None
+
     try:
-        cats_res = supabase.table("dim_categorias").select("*").execute()
+        cats_res = supabase.table("dim_categorias").select("*").order("nome").execute()
         if cats_res.data:
             for c in cats_res.data:
-                if "boleto" in c["nome"].lower():
-                    categoria_boleto_id = c["id"]
-                    break
-            if not categoria_boleto_id and len(cats_res.data) > 0:
-                categoria_boleto_id = cats_res.data[0]["id"]
+                opcoes_categorias[c["id"]] = c["nome"]
+                # Define como padrão a categoria que contém "boleto" ou a primeira encontrada
+                if "boleto" in c["nome"].lower() and not categoria_padrao_id:
+                    categoria_padrao_id = c["id"]
+            
+            if not categoria_padrao_id and len(cats_res.data) > 0:
+                categoria_padrao_id = cats_res.data[0]["id"]
     except Exception as e:
         print(f"Erro ao buscar categorias: {e}")
 
@@ -469,7 +685,7 @@ def home_page():
                 # Padronização de fontes para todos os campos
                 input_props = "outlined bg-slate-50 input-class=text-base"
 
-                # Campos Principais (Campo Categoria Removido)
+                # Campos Principais
                 with ui.column().classes("w-full gap-5"):
                     input_empresa = ui.input(
                         "Empresa / Nome do boleto",
@@ -487,12 +703,20 @@ def home_page():
                             "Data de vencimento"
                         ).props(f"{input_props} type=date").classes("w-full")
 
-                    # Status inicial com opções em Title Case (Pendente)
-                    select_status = ui.select(
-                        ["Pendente", "Pago", "Atrasado", "Cancelado"],
-                        value="Pendente",
-                        label="Status inicial"
-                    ).props(input_props).classes("w-full")
+                    with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-5"):
+                        # Campo de Seleção de Categoria
+                        select_categoria = ui.select(
+                            options=opcoes_categorias,
+                            value=categoria_padrao_id,
+                            label="Categoria"
+                        ).props(input_props).classes("w-full")
+
+                        # Status inicial com opções em Title Case (Pendente)
+                        select_status = ui.select(
+                            ["Pendente", "Pago", "Atrasado", "Cancelado"],
+                            value="Pendente",
+                            label="Status inicial"
+                        ).props(input_props).classes("w-full")
 
                 # Checkbox em Title Case
                 check_lembrete = ui.checkbox(
@@ -524,6 +748,7 @@ def home_page():
                     input_empresa.value = ""
                     input_valor.value = None
                     input_vencimento.value = None
+                    select_categoria.value = categoria_padrao_id
                     select_status.value = "Pendente"
                     check_lembrete.value = True
                     select_antecedencia.value = 1
@@ -533,9 +758,10 @@ def home_page():
                     empresa_val = input_empresa.value.strip() if input_empresa.value else ""
                     valor_val = float(input_valor.value) if input_valor.value else 0.0
                     vencimento_val = input_vencimento.value
+                    categoria_val = select_categoria.value
 
-                    if not empresa_val or not valor_val or not vencimento_val:
-                        ui.notify("Por favor, preencha empresa, valor e vencimento!", color="warning", size="lg")
+                    if not empresa_val or not valor_val or not vencimento_val or not categoria_val:
+                        ui.notify("Por favor, preencha empresa, valor, vencimento e categoria!", color="warning", size="lg")
                         return
 
                     try:
@@ -551,7 +777,7 @@ def home_page():
                             "empresa": empresa_val,
                             "valor": valor_val,
                             "data_vencimento": vencimento_val,
-                            "categoria_id": categoria_boleto_id,
+                            "categoria_id": categoria_val,
                             "status": status_formatado,
                             "tem_lembrete": check_lembrete.value,
                         }
@@ -893,8 +1119,9 @@ def dashboard_page():
 
 
 # ==========================================
-# PAINEL EXCLUSIVO DO ADMIN
+# 4. PAINEL EXCLUSIVO DO ADMIN
 # ==========================================
+
 @ui.page("/admin")
 def admin_page():
     user_email = app.storage.user.get("email", "")
@@ -906,75 +1133,302 @@ def admin_page():
     cabecalho_app(drawer)
 
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-6"):
-        ui.label("⚙️ Painel do Administrador").classes("text-amber-900 font-bold text-2xl")
+        ui.label("⚙️ Painel do Administrador").classes(
+            "text-2xl font-bold text-amber-900"
+        )
 
-        solicitacoes = supabase.table("solicitacoes_acesso").select("*").execute().data or []
+        # 1. SOLICITAÇÕES PENDENTES
+        with ui.card().classes("w-full p-4 border border-amber-200 bg-white"):
+            ui.label("Solicitações Pendentes de Acesso").classes(
+                "text-lg font-bold mb-2"
+            )
 
-        if solicitacoes:
-            with ui.card().classes("w-full p-4 border border-amber-200 bg-white shadow-sm"):
-                ui.label("Solicitações Pendentes de Acesso").classes("text-lg font-bold mb-2")
+            solicitacoes = (
+                supabase.table("solicitacoes_acesso")
+                .select("*")
+                .eq("status", "PENDENTE")
+                .execute()
+                .data
+                or []
+            )
 
-                for sol in solicitacoes:
-                    with ui.row().classes("w-full items-center justify-between p-2 border-b"):
-                        with ui.column().classes("gap-0"):
-                            ui.label(f"📧 {sol['email']}").classes("font-bold text-sm")
-                            ui.label(f"📞 Tel: {sol.get('telefone', 'Não informado')}").classes("text-xs text-gray-600")
+            if not solicitacoes:
+                ui.label("Nenhuma solicitação pendente.").classes(
+                    "text-sm text-gray-500"
+                )
 
-                        with ui.row().classes("gap-2"):
-                            async def aprovar(s=sol):
-                                telefone_informado = s.get("telefone") or ""
-                                e_valido, msg_erro = validar_telefone(telefone_informado)
-                                if not e_valido:
-                                    ui.notify(f"Erro ao aprovar {s['email']}: {msg_erro}", color="negative")
-                                    return
+            for sol in solicitacoes:
 
-                                email_usuario = s["email"].strip()
-
-                                try:
-                                    payload_perfil = {
-                                        "email": email_usuario,
-                                        "email_notificacao": email_usuario,
-                                        "telefone": telefone_informado.strip(),
-                                        "senha": s["senha_temporaria"],
-                                        "ativo": True,
-                                        "is_admin": False,
-                                    }
-
-                                    supabase.table("perfis_usuarios").insert(payload_perfil).execute()
-                                    supabase.table("solicitacoes_acesso").delete().eq("id", s["id"]).execute()
-                                    ui.notify(f"Acesso aprovado para {email_usuario}", color="positive")
-                                    ui.navigate.reload()
-                                except Exception as err:
-                                    ui.notify(f"Erro ao aprovar: {err}", color="negative")
-
-                            async def rejeitar(s=sol):
-                                supabase.table("solicitacoes_acesso").delete().eq("id", s["id"]).execute()
-                                ui.notify(f"Solicitação de {s['email']} rejeitada.", color="warning")
-                                ui.navigate.reload()
-
-                            ui.button("APROVAR", on_click=aprovar).classes("bg-blue-600 text-white text-xs font-bold")
-                            ui.button("REJEITAR", on_click=rejeitar).classes("bg-red-600 text-white text-xs font-bold")
-
-        usuarios = supabase.table("perfis_usuarios").select("*").order("email").execute().data or []
-
-        with ui.card().classes("w-full p-5 border border-amber-200 bg-white shadow-sm rounded-xl"):
-            ui.label("👥 Usuários Cadastrados").classes("text-lg font-bold text-slate-800 mb-3")
-
-            for usr in usuarios:
-                def alternar_status(u=usr):
-                    novo_status = not u.get("ativo", True)
-                    supabase.table("perfis_usuarios").update({"ativo": novo_status}).eq("id", u["id"]).execute()
-                    ui.notify(f"Status de {u['email']} alterado!", color="info")
+                def aprovar(s=sol):
+                    supabase.table("perfis_usuarios").insert({
+                        "email": s["email"],
+                        "senha": s["senha_temporaria"],
+                        "ativo": True,
+                    }).execute()
+                    supabase.table("solicitacoes_acesso").update(
+                        {"status": "APROVADO"}
+                    ).eq("id", s["id"]).execute()
+                    ui.notify(
+                        f"Acesso concedido para {s['email']}!", color="positive"
+                    )
                     ui.navigate.reload()
 
-                with ui.row().classes("w-full justify-between items-center border-b border-gray-100 py-3 gap-4"):
-                    with ui.column().classes("gap-1 flex-1"):
-                        ui.label(usr.get("email", "")).classes("font-bold text-base text-slate-800")
-                        tel = usr.get("telefone") or usr.get("whatsapp") or "Não informado"
-                        ui.label(f"📞 Telefone: {tel}").classes("text-xs text-gray-700 font-medium")
+                def rejeitar(s=sol):
+                    supabase.table("solicitacoes_acesso").update(
+                        {"status": "REJEITADO"}
+                    ).eq("id", s["id"]).execute()
+                    ui.notify(
+                        f"Solicitação de {s['email']} rejeitada.", color="warning"
+                    )
+                    ui.navigate.reload()
 
-                    if usr.get("email") != ADMIN_EMAIL:
-                        ui.button("ALTERAR STATUS", on_click=alternar_status).classes("bg-amber-500 text-white text-xs font-bold")
+                with ui.row().classes(
+                    "w-full justify-between items-center border-b py-2"
+                ):
+                    ui.label(f"{sol['email']} ({sol['localizacao']})").classes(
+                        "text-sm font-medium"
+                    )
+                    with ui.row().classes("gap-2"):
+                        ui.button(
+                            "Aprovar", icon="check_circle", on_click=aprovar
+                        ).props("color=positive").classes("font-semibold")
+                        ui.button(
+                            "Rejeitar", icon="cancel", on_click=rejeitar
+                        ).props("color=negative").classes("font-semibold")
+
+        # 2. GERENCIAMENTO DE USUÁRIOS (ATIVAR, INATIVAR E EXCLUIR)
+        with ui.card().classes("w-full p-4 border border-amber-200 bg-white"):
+            ui.label("👥 Usuários Cadastrados").classes(
+                "text-lg font-bold mb-2"
+            )
+
+            usuarios = (
+                supabase.table("perfis_usuarios")
+                .select("*")
+                .order("email")
+                .execute()
+                .data
+                or []
+            )
+
+            for usr in usuarios:
+
+                def alternar_status(u=usr):
+                    novo_status = not u.get("ativo", True)
+                    supabase.table("perfis_usuarios").update(
+                        {"ativo": novo_status}
+                    ).eq("id", u["id"]).execute()
+                    ui.notify(
+                        f"Status de {u['email']} alterado!", color="info"
+                    )
+                    ui.navigate.reload()
+
+                def confirmar_exclusao(u=usr):
+                    with ui.dialog() as dialog, ui.card().classes(
+                        "w-full max-w-sm p-4"
+                    ):
+                        ui.label("⚠️ Confirmar Exclusão").classes(
+                            "text-lg font-bold text-red-600 mb-2"
+                        )
+                        ui.label(
+                            f"Tem certeza que deseja excluir o usuário '{u['email']}'? "
+                            "Esta ação apagará todos os agendamentos vinculados a esta conta e não poderá ser desfeita."
+                        ).classes("text-sm text-gray-700 mb-4")
+
+                        def executar_exclusao():
+                            dialog.close()
+                            supabase.table("boletos").delete().eq(
+                                "user_id", u["id"]
+                            ).execute()
+                            supabase.table("perfis_usuarios").delete().eq(
+                                "id", u["id"]
+                            ).execute()
+                            ui.notify(
+                                f"Usuário {u['email']} excluído com sucesso!",
+                                color="negative",
+                            )
+                            ui.navigate.reload()
+
+                        with ui.row().classes("w-full justify-end gap-2"):
+                            ui.button(
+                                "CANCELAR", on_click=dialog.close
+                            ).props("flat text-color=gray")
+                            ui.button(
+                                "EXCLUIR", icon="delete", on_click=executar_exclusao
+                            ).classes("bg-red-600 text-white font-bold")
+
+                    dialog.open()
+
+                with ui.row().classes(
+                    "w-full justify-between items-center border-b py-2"
+                ):
+                    with ui.column().classes("gap-0"):
+                        ui.label(usr["email"]).classes("font-bold text-sm")
+                        status_label = (
+                            "Ativo" if usr.get("ativo", True) else "Inativo"
+                        )
+                        cor_status = (
+                            "text-green-600"
+                            if usr.get("ativo", True)
+                            else "text-red-600"
+                        )
+                        ui.label(f"Status: {status_label}").classes(
+                            f"text-xs {cor_status}"
+                        )
+
+                    if usr["email"] != ADMIN_EMAIL:
+                        with ui.row().classes("gap-2"):
+                            btn_label = (
+                                "Inativar"
+                                if usr.get("ativo", True)
+                                else "Ativar"
+                            )
+                            btn_color = (
+                                "warning"
+                                if usr.get("ativo", True)
+                                else "positive"
+                            )
+                            btn_icon = (
+                                "block"
+                                if usr.get("ativo", True)
+                                else "check_circle"
+                            )
+
+                            ui.button(
+                                btn_label, icon=btn_icon, on_click=alternar_status
+                            ).props(f"color={btn_color}").classes("font-semibold")
+                            ui.button(
+                                "Excluir", icon="delete", on_click=confirmar_exclusao
+                            ).props("color=negative").classes("font-semibold")
+
+        # 3. GERENCIAMENTO DE CATEGORIAS (LISTA, EDIÇÃO E EXCLUSÃO)
+        with ui.card().classes("w-full p-4 border border-amber-200 bg-white"):
+            ui.label("🏷️ Categorias de Contas").classes(
+                "text-lg font-bold mb-2"
+            )
+
+            with ui.row().classes("w-full items-center gap-2 mb-4"):
+                nova_cat = (
+                    ui.input(placeholder="Nova Categoria")
+                    .props("outlined bg-white dense")
+                    .classes("flex-1")
+                )
+
+                def add_categoria():
+                    if nova_cat.value and nova_cat.value.strip():
+                        supabase.table("dim_categorias").insert(
+                            {"nome": nova_cat.value.strip()}
+                        ).execute()
+                        ui.notify(
+                            "Categoria criada com sucesso!", color="positive"
+                        )
+                        ui.navigate.reload()
+
+                ui.button("ADICIONAR CATEGORIA", icon="add", on_click=add_categoria).classes(
+                    "bg-blue-600 text-white font-bold h-10"
+                )
+
+            ui.separator().classes("my-2")
+
+            categorias = (
+                supabase.table("dim_categorias")
+                .select("*")
+                .order("nome")
+                .execute()
+                .data
+                or []
+            )
+
+            if not categorias:
+                ui.label("Nenhuma categoria cadastrada.").classes(
+                    "text-sm text-gray-500 italic"
+                )
+
+            for cat in categorias:
+
+                def editar_categoria(c=cat):
+                    with ui.dialog() as dialog, ui.card().classes(
+                        "w-full max-w-sm p-4"
+                    ):
+                        ui.label("✏️ Editar Categoria").classes(
+                            "text-lg font-bold text-slate-800 mb-2"
+                        )
+                        campo_nome = (
+                            ui.input("Nome da Categoria", value=c["nome"])
+                            .props("outlined dense")
+                            .classes("w-full mb-4")
+                        )
+
+                        def salvar_edicao():
+                            if (
+                                campo_nome.value
+                                and campo_nome.value.strip()
+                            ):
+                                supabase.table("dim_categorias").update(
+                                    {"nome": campo_nome.value.strip()}
+                                ).eq("id", c["id"]).execute()
+                                dialog.close()
+                                ui.notify(
+                                    "Categoria atualizada!", color="positive"
+                                )
+                                ui.navigate.reload()
+
+                        with ui.row().classes("w-full justify-end gap-2"):
+                            ui.button(
+                                "CANCELAR", on_click=dialog.close
+                            ).props("flat text-color=gray")
+                            ui.button(
+                                "SALVAR", icon="save", on_click=salvar_edicao
+                            ).classes("bg-green-600 text-white font-bold")
+
+                    dialog.open()
+
+                def confirmar_exclusao_categoria(c=cat):
+                    with ui.dialog() as dialog, ui.card().classes(
+                        "w-full max-w-sm p-4"
+                    ):
+                        ui.label("⚠️ Confirmar Exclusão").classes(
+                            "text-lg font-bold text-red-600 mb-2"
+                        )
+                        ui.label(
+                            f"Tem certeza que deseja excluir a categoria '{c['nome']}'?"
+                        ).classes("text-sm text-gray-700 mb-4")
+
+                        def executar_exclusao():
+                            dialog.close()
+                            supabase.table("dim_categorias").delete().eq(
+                                "id", c["id"]
+                            ).execute()
+                            ui.notify(
+                                f"Categoria '{c['nome']}' excluída!",
+                                color="negative",
+                            )
+                            ui.navigate.reload()
+
+                        with ui.row().classes("w-full justify-end gap-2"):
+                            ui.button(
+                                "CANCELAR", on_click=dialog.close
+                            ).props("flat text-color=gray")
+                            ui.button(
+                                "EXCLUIR", icon="delete", on_click=executar_exclusao
+                            ).classes("bg-red-600 text-white font-bold")
+
+                    dialog.open()
+
+                with ui.row().classes(
+                    "w-full justify-between items-center border-b py-2"
+                ):
+                    ui.label(cat["nome"]).classes(
+                        "text-sm font-medium text-gray-800"
+                    )
+
+                    with ui.row().classes("gap-2"):
+                        ui.button("Editar", icon="edit", on_click=editar_categoria).props(
+                            "color=amber"
+                        ).classes("font-semibold")
+                        ui.button(
+                            "Excluir", icon="delete", on_click=confirmar_exclusao_categoria
+                        ).props("color=negative").classes("font-semibold")
 
 
 @app.get("/ping")
