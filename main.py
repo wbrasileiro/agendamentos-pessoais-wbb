@@ -801,6 +801,10 @@ def home_page():
 
                         ui.notify("✅ Boleto salvo com sucesso!", color="positive", size="lg")
                         limpar_formulario()
+                        
+                        # Rola a tela suavemente até o topo e foca no campo da empresa
+                        ui.run_javascript("window.scrollTo({top: 0, behavior: 'smooth'});")
+                        input_empresa.run_method("focus")
 
                     except Exception as err:
                         ui.notify(f"❌ Erro ao salvar o boleto: {err}", color="negative", size="lg")
