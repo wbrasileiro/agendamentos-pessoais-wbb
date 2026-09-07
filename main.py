@@ -464,7 +464,14 @@ def oauth2callback(request: Request):
             print(f"❌ Erro ao autenticar no Google: {e}")
             return RedirectResponse(url="/?auth=error")
 
-    return RedirectResponse(url="/?auth=success")
+    # Recupera a rota para onde deve voltar (padrão '/' caso não exista)
+        next_url = app.storage.user.get("next_url", "/")
+        
+        # Limpa a variável da sessão após o uso
+        app.storage.user.pop("next_url", None)
+
+        # Redireciona dinamicamente para a página de origem (ex: /lembretes)
+        return RedirectResponse(url=f"{next_url}?auth=success")
 
 
 def obter_credenciais_usuario(user_id: str = None):
@@ -1593,6 +1600,8 @@ def lembretes_page():
         auth_url, state = flow.authorization_url(prompt='consent', access_type='offline')
         app.storage.user["code_verifier"] = flow.code_verifier
         app.storage.user["oauth_state"] = state
+        # Guarda a rota de retorno dinamicamente
+        app.storage.user["next_url"] = "/lembretes"
         ui.navigate.to(auth_url, new_tab=False)
 
     with ui.column().classes("w-full max-w-4xl mx-auto p-3 sm:p-6 gap-6 font-sans pb-32"):
