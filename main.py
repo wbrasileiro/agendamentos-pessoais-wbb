@@ -182,19 +182,17 @@ def menu_drawer():
                         ui.icon("add_card", size="20px").classes("text-blue-600")
                         ui.label("Cadastro").classes("font-bold text-sm")
 
-            # --- SEÇÃO 2: UTILITÁRIOS ---
-            with ui.column().classes("w-full gap-1"):
-                ui.label("UTILITÁRIOS").classes("text-[11px] font-black tracking-wider text-slate-400 px-3 my-1 uppercase")
-                
-                # Lembretes
-                with ui.button(on_click=lambda: navegar("/lembretes")).props("flat no-caps align=left").classes(
-                    "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
-                ):
-                    with ui.row().classes("items-center justify-between w-full"):
-                        with ui.row().classes("items-center gap-3"):
+                # --- SEÇÃO 2: UTILITÁRIOS ---
+                with ui.column().classes("w-full gap-1"):
+                    ui.label("UTILITÁRIOS").classes("text-[11px] font-black tracking-wider text-slate-400 px-3 my-1 uppercase")
+                    
+                    # Lembretes
+                    with ui.button(on_click=lambda: navegar("/lembretes")).props("flat no-caps align=left").classes(
+                        "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
+                    ):
+                        with ui.row().classes("items-center gap-3 w-full"):
                             ui.icon("notifications_active", size="20px").classes("text-purple-600")
                             ui.label("Lembretes").classes("font-bold text-sm")
-                        ui.label("Em breve").classes("text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full")
 
                 # Tarefas
                 with ui.button(on_click=lambda: navegar("/tarefas")).props("flat no-caps align=left").classes(
@@ -392,7 +390,8 @@ def login_page():
                 app.storage.user["user_id"] = users[0]["id"]
                 app.storage.user["email"] = users[0]["email"]
                 app.storage.user["is_admin"] = users[0].get("is_admin", False) # <--- ADICIONE ESTA LINHA
-                ui.navigate.to("/")
+                #ui.navigate.to("/")
+                ui.navigate.to("/dashboard")
             else:
                 ui.notify("E-mail ou senha incorretos!", color="negative")
 
@@ -607,6 +606,60 @@ def enviar_notificacao_email(solicitante_email, telefone, dispositivo, localizac
         args=(solicitante_email, telefone, dispositivo, localizacao),
         daemon=True,
     ).start()
+
+# Função utilizada na tela de lembretes
+def criar_evento_lembrete_google_calendar(
+    user_id: str,
+    titulo: str,
+    descricao: str,
+    data_compromisso: str,
+    antecedencia_dias: int,
+    horario: str,
+):
+    """Cria evento de lembrete no Google Calendar na data/hora configurada."""
+    try:
+        creds = obter_credenciais_usuario(user_id)
+        if not creds:
+            raise Exception("Usuário não autenticado no Google Calendar.")
+
+        service = build("calendar", "v3", credentials=creds)
+
+        dt_comp = datetime.strptime(data_compromisso, "%Y-%m-%d")
+        dt_lembrete = dt_comp - timedelta(days=antecedencia_dias)
+        hora, minuto = map(int, horario.split(":"))
+
+        dt_inicio = dt_lembrete.replace(
+            hour=hora, minute=minuto, tzinfo=ZoneInfo("America/Sao_Paulo")
+        )
+        dt_fim = dt_inicio + timedelta(hours=1)
+
+        corpo_desc = descricao if descricao else "Lembrete agendado pelo sistema."
+
+        event = {
+            "summary": f"⏰ Lembrete: {titulo}",
+            "description": f"{corpo_desc}\nData do compromisso: {dt_comp.strftime('%d/%m/%Y')}",
+            "start": {
+                "dateTime": dt_inicio.isoformat(),
+                "timeZone": "America/Sao_Paulo",
+            },
+            "end": {
+                "dateTime": dt_fim.isoformat(),
+                "timeZone": "America/Sao_Paulo",
+            },
+            "reminders": {
+                "useDefault": False,
+                "overrides": [
+                    {"method": "popup", "minutes": 0},
+                    {"method": "email", "minutes": 0},
+                ],
+            },
+        }
+
+        evento_criado = service.events().insert(calendarId="primary", body=event).execute()
+        return True, evento_criado.get("id")
+    except Exception as e:
+        print(f"❌ Erro ao criar lembrete no Calendar: {e}")
+        raise e    
 
 # ==========================================
 # 1. TELA DE GESTÃO FINANCEIRA E CONTAS (REATIVIDADE & VISUAL ACESSÍVEL)
@@ -1049,7 +1102,7 @@ def home_page():
                 ui.label("ℹ️ Conecte sua conta do Google Calendar").classes("text-xl sm:text-2xl font-bold text-blue-900 w-full")
                 
                 ui.label(
-                    "Para cadastrar seus boletos e receber alertas automáticos de vencimento, "
+                    "Para cadastrar seus itens e receber alertas automáticos de vencimento, "
                     "faça a conexão com a sua conta do Google Calendar."
                 ).classes("text-base text-slate-700 leading-relaxed max-w-2xl mx-auto")
 
@@ -1066,7 +1119,7 @@ def home_page():
                 
                 # Indicador movido para o topo da página (no cabeçalho)
                 with ui.row().classes("w-full items-center justify-between border-b pb-3 gap-2"):
-                    ui.label("➕ Cadastrar novo boleto").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+                    ui.label("➕ Cadastrar").classes("text-2xl sm:text-3xl font-bold text-slate-800")
                     ui.label("✅ Conectado ao Google Calendar").classes(
                         "text-xs sm:text-sm font-bold text-green-800 bg-green-100 px-3 py-1.5 rounded-lg border border-green-300"
                     )
@@ -1077,8 +1130,8 @@ def home_page():
                 # Campos Principais
                 with ui.column().classes("w-full gap-5"):
                     input_empresa = ui.input(
-                        "Empresa / Nome do boleto",
-                        placeholder="Ex: Boticário, Eudora..."
+                        "Empresa boleto / Nome do cliente",
+                        placeholder="Ex: Boticário, Carla amiga..."
                     ).props(input_props).classes("w-full")
 
                     with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-5"):
@@ -1156,7 +1209,7 @@ def home_page():
                     try:
                         dup_res = supabase.table("boletos").select("id").eq("user_id", user_id).eq("empresa", empresa_val).eq("valor", valor_val).eq("data_vencimento", vencimento_val).execute()
                         if dup_res.data and len(dup_res.data) > 0:
-                            ui.notify("⚠️ Atenção: Este boleto já está cadastrado no sistema!", color="warning", size="lg")
+                            ui.notify("⚠️ Atenção: Este item já está cadastrado no sistema!", color="warning", size="lg")
                             return
 
                         status_formatado = str(select_status.value).strip().capitalize() if select_status.value else "Pendente"
@@ -1188,7 +1241,7 @@ def home_page():
 
                         supabase.table("boletos").insert(payload).execute()
 
-                        ui.notify("✅ Boleto salvo com sucesso!", color="positive", size="lg")
+                        ui.notify("✅ Item salvo com sucesso!", color="positive", size="lg")
                         limpar_formulario()
                         
                         # Rola a tela suavemente até o topo e foca no campo da empresa
@@ -1196,7 +1249,7 @@ def home_page():
                         input_empresa.run_method("focus")
 
                     except Exception as err:
-                        ui.notify(f"❌ Erro ao salvar o boleto: {err}", color="negative", size="lg")
+                        ui.notify(f"❌ Erro ao salvar o item: {err}", color="negative", size="lg")
 
                 # Botão atualizado para Title Case: "💾 Salvar boleto"
                 ui.button("💾 Salvar", on_click=salvar_boleto).classes(
@@ -1517,6 +1570,160 @@ def admin_page():
                         ui.button(
                             "Excluir", icon="delete", on_click=confirmar_exclusao_categoria
                         ).props("color=negative").classes("font-semibold")
+
+
+# ==========================================
+# TELA DE UTILITÁRIOS - LEMBRETES
+# ==========================================
+@ui.page("/lembretes")
+def lembretes_page():
+    if not app.storage.user.get("user_id"):
+        ui.navigate.to("/login")
+        return
+
+    drawer = menu_drawer()
+    cabecalho_app(drawer)
+    user_id = app.storage.user.get("user_id")
+
+    # Checagem de autenticação no Google Calendar
+    esta_autenticado = bool(user_id and user_id in user_tokens)
+
+    def conectar_google():
+        flow = obter_flow()
+        auth_url, state = flow.authorization_url(prompt='consent', access_type='offline')
+        app.storage.user["code_verifier"] = flow.code_verifier
+        app.storage.user["oauth_state"] = state
+        ui.navigate.to(auth_url, new_tab=False)
+
+    with ui.column().classes("w-full max-w-4xl mx-auto p-3 sm:p-6 gap-6 font-sans pb-32"):
+        
+        # ----------------------------------------------------
+        # CASO 1: DESCONECTADO DO GOOGLE CALENDAR
+        # ----------------------------------------------------
+        if not esta_autenticado:
+            with ui.card().classes("w-full p-8 border border-blue-200 bg-blue-50/70 shadow-md rounded-2xl gap-5 text-center my-4"):
+                ui.label("ℹ️ Conecte sua conta do Google Calendar").classes("text-xl sm:text-2xl font-bold text-blue-900 w-full")
+                
+                ui.label(
+                    "Para cadastrar seus lembretes e receber alertas automáticos da sua agenda, "
+                    "faça a conexão com a sua conta do Google Calendar."
+                ).classes("text-base text-slate-700 leading-relaxed max-w-2xl mx-auto")
+
+                ui.button(
+                    "🔗 Conectar conta Google", 
+                    on_click=conectar_google
+                ).classes("bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-3 px-8 rounded-xl shadow mx-auto mt-2")
+
+        # ----------------------------------------------------
+        # CASO 2: CONECTADO (FORMULÁRIO DE LEMBRETES)
+        # ----------------------------------------------------
+        else:
+            with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-5"):
+                
+                with ui.row().classes("w-full items-center justify-between border-b pb-3 gap-2"):
+                    ui.label("🔔 Cadastrar novo lembrete").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+                    ui.label("✅ Conectado ao Google Calendar").classes(
+                        "text-xs sm:text-sm font-bold text-green-800 bg-green-100 px-3 py-1.5 rounded-lg border border-green-300"
+                    )
+
+                input_props = "outlined bg-slate-50 input-class=text-base"
+
+                # Campos da Tela de Lembretes
+                with ui.column().classes("w-full gap-5"):
+                    input_titulo = ui.input(
+                        "Título do compromisso",
+                        placeholder="Ex: Reunião de equipe, Consulta médica..."
+                    ).props(input_props).classes("w-full")
+
+                    input_descricao = ui.textarea(
+                        "Descrição (Opcional)",
+                        placeholder="Adicione detalhes, links ou observações sobre o compromisso..."
+                    ).props(f"{input_props} rows=3").classes("w-full")
+
+                    input_data_compromisso = ui.input(
+                        "Data do compromisso"
+                    ).props(f"{input_props} type=date").classes("w-full sm:w-1/2")
+
+                # Opção de Lembrete (Flagged / True por padrão)
+                check_lembrete = ui.checkbox(
+                    "🔔 Desejo receber um lembrete no Google Calendar",
+                    value=True
+                ).classes("mt-3 text-base sm:text-lg text-slate-800 font-bold")
+
+                # Container com as mesmas opções da tela de boletos
+                container_lembrete = ui.column().classes("w-full p-5 bg-purple-50/50 border border-purple-200 rounded-xl gap-4")
+                container_lembrete.bind_visibility_from(check_lembrete, "value")
+
+                with container_lembrete:
+                    ui.label("Configuração do lembrete").classes("text-sm font-bold text-purple-900 uppercase tracking-wide")
+
+                    with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-4"):
+                        select_antecedencia = ui.select(
+                            {0: "No dia do compromisso", 1: "1 dia antes", 2: "2 dias antes", 3: "3 dias antes", 4: "4 dias antes", 5: "5 dias antes"},
+                            value=1,
+                            label="Antecedência do aviso",
+                        ).props("outlined bg-white input-class=text-base").classes("w-full")
+
+                        input_horario = ui.input(
+                            "Horário do alerta",
+                            value="12:00"
+                        ).props("type=time outlined bg-white input-class=text-base").classes("w-full")
+
+                def limpar_formulario():
+                    input_titulo.value = ""
+                    input_descricao.value = ""
+                    input_data_compromisso.value = None
+                    check_lembrete.value = True
+                    select_antecedencia.value = 1
+                    input_horario.value = "12:00"
+
+                async def salvar_lembrete():
+                    titulo_val = input_titulo.value.strip() if input_titulo.value else ""
+                    descricao_val = input_descricao.value.strip() if input_descricao.value else ""
+                    data_comp_val = input_data_compromisso.value
+
+                    if not titulo_val or not data_comp_val:
+                        ui.notify("Por favor, preencha o título e a data do compromisso!", color="warning", size="lg")
+                        return
+
+                    try:
+                        payload = {
+                            "user_id": user_id,
+                            "titulo": titulo_val,
+                            "descricao": descricao_val,
+                            "data_compromisso": data_comp_val,
+                            "tem_lembrete": check_lembrete.value,
+                        }
+
+                        if check_lembrete.value:
+                            payload["canal_lembrete"] = "Google Calendar"
+                            payload["antecedencia_dias"] = select_antecedencia.value
+                            payload["horario_lembrete"] = input_horario.value
+
+                            await asyncio.to_thread(
+                                criar_evento_lembrete_google_calendar,
+                                user_id,
+                                titulo_val,
+                                descricao_val,
+                                data_comp_val,
+                                select_antecedencia.value,
+                                input_horario.value,
+                            )
+
+                        supabase.table("lembretes").insert(payload).execute()
+
+                        ui.notify("✅ Lembrete salvo com sucesso!", color="positive", size="lg")
+                        limpar_formulario()
+                        
+                        ui.run_javascript("window.scrollTo({top: 0, behavior: 'smooth'});")
+                        input_titulo.run_method("focus")
+
+                    except Exception as err:
+                        ui.notify(f"❌ Erro ao salvar o lembrete: {err}", color="negative", size="lg")
+
+                ui.button("💾 Salvar Lembrete", on_click=salvar_lembrete).classes(
+                    "bg-purple-600 hover:bg-purple-700 text-white font-bold text-lg mt-3 w-full py-3.5 rounded-xl shadow"
+                )                        
 
 
 @app.get("/ping")
