@@ -1606,7 +1606,10 @@ def lembretes_page():
         app.storage.user["next_url"] = "/lembretes"
         ui.navigate.to(auth_url, new_tab=False)
 
-    with ui.column().classes("w-full max-w-5xl mx-auto p-3 sm:p-6 gap-6 font-sans pb-32"):
+    # Âncora no topo para scroll suave (Requisito 4)
+    topo_ancora = ui.element('div').classes('w-full')
+
+    with ui.column().classes("w-full max-w-5xl mx-auto p-3 sm:p-6 gap-8 font-sans pb-32"):
         
         # ----------------------------------------------------
         # CASO 1: DESCONECTADO DO GOOGLE CALENDAR
@@ -1624,20 +1627,28 @@ def lembretes_page():
                 )
 
         # ----------------------------------------------------
-        # CASO 2: FORMULÁRIO + LISTAGEM COM CARDS E FILTROS
+        # CASO 2: PAINEL PRINCIPAL (CADASTRAR vs GERENCIAR)
         # ----------------------------------------------------
         else:
-            # 1. CARD DE CADASTRO
-            with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-5"):
-                with ui.row().classes("w-full items-center justify-between border-b pb-3 gap-2"):
-                    ui.label("🔔 Cadastrar novo lembrete").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+            # Estado para controlar edição
+            lembrete_em_edicao = {'id': None}
+
+            # ====================================================
+            # SEÇÃO 1: CADASTRO / EDIÇÃO DE LEMBRETES (Requisito 3)
+            # ====================================================
+            with ui.card().classes("w-full p-4 sm:p-6 border-2 border-purple-200 bg-purple-50/20 shadow-md rounded-2xl gap-5"):
+                with ui.row().classes("w-full items-center justify-between border-b border-purple-100 pb-3 gap-2"):
+                    with ui.row().classes("items-center gap-2"):
+                        ui.icon("add_alert", size="28px").classes("text-purple-600")
+                        titulo_formulario = ui.label("Cadastrar novo lembrete").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+                    
                     ui.label("✅ Conectado ao Google Calendar").classes(
                         "text-xs sm:text-sm font-bold text-green-800 bg-green-100 px-3 py-1.5 rounded-lg border border-green-300"
                     )
 
-                input_props = "outlined bg-slate-50 input-class=text-base"
+                input_props = "outlined bg-white input-class=text-base"
 
-                with ui.column().classes("w-full gap-5"):
+                with ui.column().classes("w-full gap-4"):
                     input_titulo = ui.input(
                         "Título do compromisso", placeholder="Ex: Reunião de equipe, Consulta médica..."
                     ).props(input_props).classes("w-full")
@@ -1652,7 +1663,7 @@ def lembretes_page():
                     "mt-2 text-base font-bold text-slate-800"
                 )
 
-                container_lembrete = ui.column().classes("w-full p-4 bg-purple-50/50 border border-purple-200 rounded-xl gap-4")
+                container_lembrete = ui.column().classes("w-full p-4 bg-white border border-purple-200 rounded-xl gap-4 shadow-sm")
                 container_lembrete.bind_visibility_from(check_lembrete, "value")
 
                 with container_lembrete:
@@ -1666,6 +1677,11 @@ def lembretes_page():
                         input_horario = ui.input("Horário do alerta", value="12:00").props("type=time outlined bg-white input-class=text-base").classes("w-full")
 
                 def limpar_formulario():
+                    lembrete_em_edicao['id'] = None
+                    titulo_formulario.set_text("Cadastrar novo lembrete")
+                    btn_salvar.set_text("💾 Salvar Lembrete")
+                    btn_cancelar.set_visibility(False)
+                    
                     input_titulo.value = ""
                     input_descricao.value = ""
                     input_data_compromisso.value = None
@@ -1689,7 +1705,6 @@ def lembretes_page():
                             "descricao": descricao_val,
                             "data_compromisso": data_comp_val,
                             "tem_lembrete": check_lembrete.value,
-                            "concluido": False,
                         }
 
                         if check_lembrete.value:
@@ -1703,38 +1718,77 @@ def lembretes_page():
                                 select_antecedencia.value, input_horario.value,
                             )
 
-                        supabase.table("lembretes").insert(payload).execute()
-                        ui.notify("✅ Lembrete salvo com sucesso!", color="positive", size="lg")
+                        # Atualização ou Inserção
+                        if lembrete_em_edicao['id']:
+                            supabase.table("lembretes").update(payload).eq("id", lembrete_em_edicao['id']).execute()
+                            ui.notify("✅ Lembrete atualizado com sucesso!", color="positive", size="lg")
+                        else:
+                            payload["concluido"] = False
+                            supabase.table("lembretes").insert(payload).execute()
+                            ui.notify("✅ Lembrete salvo com sucesso!", color="positive", size="lg")
+
                         limpar_formulario()
                         carregar_e_renderizar_lembretes()
+                        
+                        # Rolagem até o topo do formulário (Requisito 4)
+                        ui.run_javascript(f'document.getElementById("{topo_ancora.id}").scrollIntoView({{behavior: "smooth"}});')
+
                     except Exception as err:
                         ui.notify(f"❌ Erro ao salvar o lembrete: {err}", color="negative", size="lg")
 
-                ui.button("💾 Salvar Lembrete", on_click=salvar_lembrete).classes(
-                    "bg-purple-600 hover:bg-purple-700 text-white font-bold text-base mt-2 w-full py-3 rounded-xl shadow transition-all"
-                )
+                with ui.row().classes("w-full gap-3 mt-2"):
+                    btn_salvar = ui.button("💾 Salvar Lembrete", on_click=salvar_lembrete).classes(
+                        "bg-purple-600 hover:bg-purple-700 text-white font-bold text-base flex-1 py-3 rounded-xl shadow transition-all"
+                    )
+                    btn_cancelar = ui.button("Cancelar", on_click=limpar_formulario).classes(
+                        "bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 px-6 rounded-xl transition-all"
+                    )
+                    btn_cancelar.set_visibility(False)
 
-            # ----------------------------------------------------
-            # 2. BARRA DE FILTROS E PESQUISA
-            # ----------------------------------------------------
-            with ui.card().classes("w-full p-4 border border-slate-200 bg-slate-50 shadow-sm rounded-2xl gap-3"):
-                ui.label("🔍 Filtros de Busca").classes("text-sm font-bold text-slate-700 uppercase tracking-wide")
-                
-                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"):
-                    filter_busca = ui.input("Buscar por título ou descrição", placeholder="Digite para buscar...").props("outlined bg-white dense").classes("w-full")
-                    
-                    filter_status = ui.select(
-                        {"todos": "Todos os status", "pendente": "Pendente", "atrasado": "Atrasado", "concluido": "Concluído"},
-                        value="todos", label="Status"
-                    ).props("outlined bg-white dense").classes("w-full")
+            # ====================================================
+            # SEÇÃO 2: GESTÃO E CONSULTA DE LEMBRETES (Requisito 3)
+            # ====================================================
+            with ui.column().classes("w-full gap-4 mt-4"):
+                with ui.row().classes("w-full items-center gap-2 border-b pb-2"):
+                    ui.icon("folder_special", size="28px").classes("text-slate-700")
+                    ui.label("Gestão de Lembretes Cadastrados").classes("text-2xl sm:text-3xl font-bold text-slate-800")
 
-                    filter_data_inicio = ui.input("De (Data)").props("type=date outlined bg-white dense").classes("w-full")
-                    filter_data_fim = ui.input("Até (Data)").props("type=date outlined bg-white dense").classes("w-full")
+                # FILTROS RECOLHÍVEIS (Requisito 2)
+                with ui.expansion("🔍 Filtros de Busca e Pesquisa", icon="search").classes(
+                    "w-full bg-slate-100 border border-slate-200 rounded-2xl shadow-sm text-slate-700 font-bold"
+                ):
+                    with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-2"):
+                        filter_busca = ui.input("Buscar por título ou descrição", placeholder="Digite para buscar...").props("outlined bg-white dense").classes("w-full")
+                        
+                        filter_status = ui.select(
+                            {"todos": "Todos os status", "pendente": "Pendente", "atrasado": "Atrasado", "concluido": "Concluído"},
+                            value="todos", label="Status"
+                        ).props("outlined bg-white dense").classes("w-full")
 
-            # Container onde os cards serão renderizados
-            container_cards = ui.column().classes("w-full gap-4 mt-2")
+                        filter_data_inicio = ui.input("De (Data)").props("type=date outlined bg-white dense").classes("w-full")
+                        filter_data_fim = ui.input("Até (Data)").props("type=date outlined bg-white dense").classes("w-full")
 
-            # Function para atualizar status de conclusão no Supabase
+                # Container onde os cards serão renderizados
+                container_cards = ui.column().classes("w-full gap-4 mt-2")
+
+            # Function para carregar dados para Edição (Requisito 1)
+            def preparar_edicao(item: dict):
+                lembrete_em_edicao['id'] = item['id']
+                titulo_formulario.set_text("✏️ Editar lembrete")
+                btn_salvar.set_text("🔄 Atualizar Lembrete")
+                btn_cancelar.set_visibility(True)
+
+                input_titulo.value = item.get("titulo", "")
+                input_descricao.value = item.get("descricao", "")
+                input_data_compromisso.value = item.get("data_compromisso")
+                check_lembrete.value = item.get("tem_lembrete", False)
+                select_antecedencia.value = item.get("antecedencia_dias", 1)
+                input_horario.value = item.get("horario_lembrete", "12:00")
+
+                # Sobe a tela até o formulário de edição (Requisito 4)
+                ui.run_javascript(f'document.getElementById("{topo_ancora.id}").scrollIntoView({{behavior: "smooth"}});')
+
+            # Function para atualizar status de conclusão
             def alternar_status_conclusao(lembrete_id: int, status_atual: bool):
                 try:
                     supabase.table("lembretes").update({"concluido": not status_atual}).eq("id", lembrete_id).execute()
@@ -1744,24 +1798,35 @@ def lembretes_page():
                 except Exception as e:
                     ui.notify(f"Erro ao atualizar compromisso: {e}", color="negative")
 
-            def deletar_lembrete(lembrete_id: int):
-                try:
-                    supabase.table("lembretes").delete().eq("id", lembrete_id).execute()
-                    ui.notify("Lembrete removido com sucesso!", color="info")
-                    carregar_e_renderizar_lembretes()
-                except Exception as e:
-                    ui.notify(f"Erro ao remover lembrete: {e}", color="negative")
+            # Modal e Função de Exclusão com Confirmação (Requisito 1)
+            def confirmar_exclusao(lembrete_id: int):
+                with ui.dialog() as dialog, ui.card().classes("p-6 gap-4 border border-slate-200 rounded-2xl max-w-sm w-full"):
+                    ui.label("⚠️ Confirmar exclusão").classes("text-lg font-bold text-slate-800")
+                    ui.label("Tem certeza que deseja excluir este lembrete? Esta ação não pode ser desfeita.").classes("text-sm text-slate-600")
+                    
+                    with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                        ui.button("Cancelar", on_click=dialog.close).props("flat").classes("text-slate-600")
+                        
+                        def efetuar_delecao():
+                            try:
+                                supabase.table("lembretes").delete().eq("id", lembrete_id).execute()
+                                ui.notify("Lembrete removido com sucesso!", color="info")
+                                dialog.close()
+                                carregar_e_renderizar_lembretes()
+                            except Exception as e:
+                                ui.notify(f"Erro ao remover lembrete: {e}", color="negative")
+
+                        ui.button("Excluir", on_click=efetuar_delecao).props("unelevated color=negative").classes("rounded-lg")
+                dialog.open()
 
             # Renderização dinâmica dos Cards
             def carregar_e_renderizar_lembretes():
                 container_cards.clear()
                 hoje = date.today()
 
-                # Busca todos os lembretes do usuário
                 res = supabase.table("lembretes").select("*").eq("user_id", user_id).order("data_compromisso", desc=False).execute()
                 todos_lembretes = res.data or []
 
-                # Aplicação dos Filtros na memória
                 termo = filter_busca.value.lower().strip() if filter_busca.value else ""
                 status_f = filter_status.value
                 dt_ini = filter_data_inicio.value
@@ -1769,7 +1834,6 @@ def lembretes_page():
 
                 lembretes_filtrados = []
                 for item in todos_lembretes:
-                    # Determina o status calculado
                     dt_comp = datetime.strptime(item["data_compromisso"], "%Y-%m-%d").date()
                     is_concluido = item.get("concluido", False)
 
@@ -1783,15 +1847,10 @@ def lembretes_page():
                     item["_status_calc"] = calc_status
                     item["_dt_comp"] = dt_comp
 
-                    # Filtro por Busca (Título/Descrição)
                     if termo and not (termo in item.get("titulo", "").lower() or termo in (item.get("descricao") or "").lower()):
                         continue
-
-                    # Filtro por Status
                     if status_f != "todos" and calc_status != status_f:
                         continue
-
-                    # Filtro por Período
                     if dt_ini and item["data_compromisso"] < dt_ini:
                         continue
                     if dt_fim and item["data_compromisso"] > dt_fim:
@@ -1799,7 +1858,6 @@ def lembretes_page():
 
                     lembretes_filtrados.append(item)
 
-                # Separação por Abas/Seções
                 pendentes_atrasados = [l for l in lembretes_filtrados if l["_status_calc"] in ["pendente", "atrasado"]]
                 concluidos = [l for l in lembretes_filtrados if l["_status_calc"] == "concluido"]
 
@@ -1810,7 +1868,6 @@ def lembretes_page():
 
                     with ui.tab_panels(tabs, value=tab_pendentes).classes("w-full bg-transparent pt-4 gap-4"):
                         
-                        # ABA 1: PENDENTES & ATRASADOS
                         with ui.tab_panel(tab_pendentes).classes("p-0 w-full gap-4"):
                             if not pendentes_atrasados:
                                 with ui.card().classes("w-full p-8 text-center bg-slate-50 border border-dashed rounded-xl"):
@@ -1819,7 +1876,6 @@ def lembretes_page():
                                 for item in pendentes_atrasados:
                                     renderizar_card_lembrete(item)
 
-                        # ABA 2: CONCLUÍDOS
                         with ui.tab_panel(tab_concluidos).classes("p-0 w-full gap-4"):
                             if not concluidos:
                                 with ui.card().classes("w-full p-8 text-center bg-slate-50 border border-dashed rounded-xl"):
@@ -1834,7 +1890,6 @@ def lembretes_page():
                 l_id = item["id"]
                 is_concluido = item.get("concluido", False)
 
-                # Estilização visual por status
                 if status == "atrasado":
                     border_color = "border-l-8 border-l-red-500 border-red-200 bg-red-50/30"
                     badge_bg = "bg-red-100 text-red-800 border-red-300"
@@ -1854,7 +1909,7 @@ def lembretes_page():
                 with ui.card().classes(f"w-full p-4 border shadow-sm rounded-xl transition-all hover:shadow-md mb-3 {border_color}"):
                     with ui.row().classes("w-full items-start justify-between gap-3"):
                         
-                        # Lado Esquerdo: Checkbox + Título + Descrição + Metadados
+                        # Lado Esquerdo: Checkbox + Conteúdo
                         with ui.row().classes("items-start gap-3 flex-1"):
                             ui.checkbox(
                                 value=is_concluido,
@@ -1876,24 +1931,30 @@ def lembretes_page():
                                             f"⏰ Alerta: {item.get('antecedencia_dias')}d antes às {item.get('horario_lembrete')}"
                                         ).classes("bg-purple-50 text-purple-700 px-2.5 py-1 rounded-md border border-purple-200")
 
-                        # Lado Direito: Badge de Status + Ações
+                        # Lado Direito: Status + Botões de Ação (Requisito 1)
                         with ui.column().classes("items-end gap-2"):
                             with ui.row().classes(f"items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold {badge_bg}"):
                                 ui.icon(badge_icon, size="16px")
                                 ui.label(status_text)
 
-                            ui.button(
-                                icon="delete",
-                                on_click=lambda lid=l_id: deletar_lembrete(lid)
-                            ).props("flat round dense color=negative").classes("mt-1 hover:bg-red-50").tooltip("Excluir Lembrete")
+                            with ui.row().classes("items-center gap-1 mt-1"):
+                                ui.button(
+                                    icon="edit",
+                                    on_click=lambda it=item: preparar_edicao(it)
+                                ).props("flat round dense color=primary").classes("hover:bg-blue-50").tooltip("Editar Lembrete")
 
-            # Listeners dos filtros para recarregar a lista instantaneamente
+                                ui.button(
+                                    icon="delete",
+                                    on_click=lambda lid=l_id: confirmar_exclusao(lid)
+                                ).props("flat round dense color=negative").classes("hover:bg-red-50").tooltip("Excluir Lembrete")
+
+            # Listeners dos filtros
             filter_busca.on("update:model-value", carregar_e_renderizar_lembretes)
             filter_status.on("update:model-value", carregar_e_renderizar_lembretes)
             filter_data_inicio.on("update:model-value", carregar_e_renderizar_lembretes)
             filter_data_fim.on("update:model-value", carregar_e_renderizar_lembretes)
 
-            # Carga Inicial dos Lembretes
+            # Carga Inicial
             carregar_e_renderizar_lembretes()
 
 
