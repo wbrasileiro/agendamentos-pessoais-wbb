@@ -1579,6 +1579,10 @@ def admin_page():
                         ).props("color=negative").classes("font-semibold")
 
 
+
+from datetime import datetime, date
+import asyncio
+
 # ==========================================
 # TELA DE UTILITÁRIOS - LEMBRETES
 # ==========================================
@@ -1592,7 +1596,6 @@ def lembretes_page():
     cabecalho_app(drawer)
     user_id = app.storage.user.get("user_id")
 
-    # Checagem de autenticação no Google Calendar
     esta_autenticado = bool(user_id and user_id in user_tokens)
 
     def conectar_google():
@@ -1600,11 +1603,10 @@ def lembretes_page():
         auth_url, state = flow.authorization_url(prompt='consent', access_type='offline')
         app.storage.user["code_verifier"] = flow.code_verifier
         app.storage.user["oauth_state"] = state
-        # Guarda a rota de retorno dinamicamente
         app.storage.user["next_url"] = "/lembretes"
         ui.navigate.to(auth_url, new_tab=False)
 
-    with ui.column().classes("w-full max-w-4xl mx-auto p-3 sm:p-6 gap-6 font-sans pb-32"):
+    with ui.column().classes("w-full max-w-5xl mx-auto p-3 sm:p-6 gap-6 font-sans pb-32"):
         
         # ----------------------------------------------------
         # CASO 1: DESCONECTADO DO GOOGLE CALENDAR
@@ -1612,23 +1614,21 @@ def lembretes_page():
         if not esta_autenticado:
             with ui.card().classes("w-full p-8 border border-blue-200 bg-blue-50/70 shadow-md rounded-2xl gap-5 text-center my-4"):
                 ui.label("ℹ️ Conecte sua conta do Google Calendar").classes("text-xl sm:text-2xl font-bold text-blue-900 w-full")
-                
                 ui.label(
                     "Para cadastrar seus lembretes e receber alertas automáticos da sua agenda, "
                     "faça a conexão com a sua conta do Google Calendar."
                 ).classes("text-base text-slate-700 leading-relaxed max-w-2xl mx-auto")
 
-                ui.button(
-                    "🔗 Conectar conta Google", 
-                    on_click=conectar_google
-                ).classes("bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-3 px-8 rounded-xl shadow mx-auto mt-2")
+                ui.button("🔗 Conectar conta Google", on_click=conectar_google).classes(
+                    "bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-3 px-8 rounded-xl shadow mx-auto mt-2"
+                )
 
         # ----------------------------------------------------
-        # CASO 2: CONECTADO (FORMULÁRIO DE LEMBRETES)
+        # CASO 2: FORMULÁRIO + LISTAGEM COM CARDS E FILTROS
         # ----------------------------------------------------
         else:
+            # 1. CARD DE CADASTRO
             with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-5"):
-                
                 with ui.row().classes("w-full items-center justify-between border-b pb-3 gap-2"):
                     ui.label("🔔 Cadastrar novo lembrete").classes("text-2xl sm:text-3xl font-bold text-slate-800")
                     ui.label("✅ Conectado ao Google Calendar").classes(
@@ -1637,46 +1637,33 @@ def lembretes_page():
 
                 input_props = "outlined bg-slate-50 input-class=text-base"
 
-                # Campos da Tela de Lembretes
                 with ui.column().classes("w-full gap-5"):
                     input_titulo = ui.input(
-                        "Título do compromisso",
-                        placeholder="Ex: Reunião de equipe, Consulta médica..."
+                        "Título do compromisso", placeholder="Ex: Reunião de equipe, Consulta médica..."
                     ).props(input_props).classes("w-full")
 
                     input_descricao = ui.textarea(
-                        "Descrição (Opcional)",
-                        placeholder="Adicione detalhes, links ou observações sobre o compromisso..."
-                    ).props(f"{input_props} rows=3").classes("w-full")
+                        "Descrição (Opcional)", placeholder="Adicione detalhes, links ou observações..."
+                    ).props(f"{input_props} rows=2").classes("w-full")
 
-                    input_data_compromisso = ui.input(
-                        "Data do compromisso"
-                    ).props(f"{input_props} type=date").classes("w-full sm:w-1/2")
+                    input_data_compromisso = ui.input("Data do compromisso").props(f"{input_props} type=date").classes("w-full sm:w-1/2")
 
-                # Opção de Lembrete (Flagged / True por padrão)
-                check_lembrete = ui.checkbox(
-                    "🔔 Desejo receber um lembrete no Google Calendar",
-                    value=True
-                ).classes("mt-3 text-base sm:text-lg text-slate-800 font-bold")
+                check_lembrete = ui.checkbox("🔔 Desejo receber um lembrete no Google Calendar", value=True).classes(
+                    "mt-2 text-base font-bold text-slate-800"
+                )
 
-                # Container com as mesmas opções da tela de boletos
-                container_lembrete = ui.column().classes("w-full p-5 bg-purple-50/50 border border-purple-200 rounded-xl gap-4")
+                container_lembrete = ui.column().classes("w-full p-4 bg-purple-50/50 border border-purple-200 rounded-xl gap-4")
                 container_lembrete.bind_visibility_from(check_lembrete, "value")
 
                 with container_lembrete:
-                    ui.label("Configuração do lembrete").classes("text-sm font-bold text-purple-900 uppercase tracking-wide")
-
+                    ui.label("Configuração do lembrete").classes("text-xs font-bold text-purple-900 uppercase tracking-wide")
                     with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-4"):
                         select_antecedencia = ui.select(
                             {0: "No dia do compromisso", 1: "1 dia antes", 2: "2 dias antes", 3: "3 dias antes", 4: "4 dias antes", 5: "5 dias antes"},
-                            value=1,
-                            label="Antecedência do aviso",
+                            value=1, label="Antecedência do aviso",
                         ).props("outlined bg-white input-class=text-base").classes("w-full")
 
-                        input_horario = ui.input(
-                            "Horário do alerta",
-                            value="12:00"
-                        ).props("type=time outlined bg-white input-class=text-base").classes("w-full")
+                        input_horario = ui.input("Horário do alerta", value="12:00").props("type=time outlined bg-white input-class=text-base").classes("w-full")
 
                 def limpar_formulario():
                     input_titulo.value = ""
@@ -1702,6 +1689,7 @@ def lembretes_page():
                             "descricao": descricao_val,
                             "data_compromisso": data_comp_val,
                             "tem_lembrete": check_lembrete.value,
+                            "concluido": False,
                         }
 
                         if check_lembrete.value:
@@ -1711,28 +1699,202 @@ def lembretes_page():
 
                             await asyncio.to_thread(
                                 criar_evento_lembrete_google_calendar,
-                                user_id,
-                                titulo_val,
-                                descricao_val,
-                                data_comp_val,
-                                select_antecedencia.value,
-                                input_horario.value,
+                                user_id, titulo_val, descricao_val, data_comp_val,
+                                select_antecedencia.value, input_horario.value,
                             )
 
                         supabase.table("lembretes").insert(payload).execute()
-
                         ui.notify("✅ Lembrete salvo com sucesso!", color="positive", size="lg")
                         limpar_formulario()
-                        
-                        ui.run_javascript("window.scrollTo({top: 0, behavior: 'smooth'});")
-                        input_titulo.run_method("focus")
-
+                        carregar_e_renderizar_lembretes()
                     except Exception as err:
                         ui.notify(f"❌ Erro ao salvar o lembrete: {err}", color="negative", size="lg")
 
                 ui.button("💾 Salvar Lembrete", on_click=salvar_lembrete).classes(
-                    "bg-purple-600 hover:bg-purple-700 text-white font-bold text-lg mt-3 w-full py-3.5 rounded-xl shadow"
-                )                        
+                    "bg-purple-600 hover:bg-purple-700 text-white font-bold text-base mt-2 w-full py-3 rounded-xl shadow transition-all"
+                )
+
+            # ----------------------------------------------------
+            # 2. BARRA DE FILTROS E PESQUISA
+            # ----------------------------------------------------
+            with ui.card().classes("w-full p-4 border border-slate-200 bg-slate-50 shadow-sm rounded-2xl gap-3"):
+                ui.label("🔍 Filtros de Busca").classes("text-sm font-bold text-slate-700 uppercase tracking-wide")
+                
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"):
+                    filter_busca = ui.input("Buscar por título ou descrição", placeholder="Digite para buscar...").props("outlined bg-white dense").classes("w-full")
+                    
+                    filter_status = ui.select(
+                        {"todos": "Todos os status", "pendente": "Pendente", "atrasado": "Atrasado", "concluido": "Concluído"},
+                        value="todos", label="Status"
+                    ).props("outlined bg-white dense").classes("w-full")
+
+                    filter_data_inicio = ui.input("De (Data)").props("type=date outlined bg-white dense").classes("w-full")
+                    filter_data_fim = ui.input("Até (Data)").props("type=date outlined bg-white dense").classes("w-full")
+
+            # Container onde os cards serão renderizados
+            container_cards = ui.column().classes("w-full gap-4 mt-2")
+
+            # Function para atualizar status de conclusão no Supabase
+            def alternar_status_conclusao(lembrete_id: int, status_atual: bool):
+                try:
+                    supabase.table("lembretes").update({"concluido": not status_atual}).eq("id", lembrete_id).execute()
+                    status_nome = "reaberto" if status_atual else "concluído"
+                    ui.notify(f"Compromisso marcado como {status_nome}!", color="positive")
+                    carregar_e_renderizar_lembretes()
+                except Exception as e:
+                    ui.notify(f"Erro ao atualizar compromisso: {e}", color="negative")
+
+            def deletar_lembrete(lembrete_id: int):
+                try:
+                    supabase.table("lembretes").delete().eq("id", lembrete_id).execute()
+                    ui.notify("Lembrete removido com sucesso!", color="info")
+                    carregar_e_renderizar_lembretes()
+                except Exception as e:
+                    ui.notify(f"Erro ao remover lembrete: {e}", color="negative")
+
+            # Renderização dinâmica dos Cards
+            def carregar_e_renderizar_lembretes():
+                container_cards.clear()
+                hoje = date.today()
+
+                # Busca todos os lembretes do usuário
+                res = supabase.table("lembretes").select("*").eq("user_id", user_id).order("data_compromisso", desc=False).execute()
+                todos_lembretes = res.data or []
+
+                # Aplicação dos Filtros na memória
+                termo = filter_busca.value.lower().strip() if filter_busca.value else ""
+                status_f = filter_status.value
+                dt_ini = filter_data_inicio.value
+                dt_fim = filter_data_fim.value
+
+                lembretes_filtrados = []
+                for item in todos_lembretes:
+                    # Determina o status calculado
+                    dt_comp = datetime.strptime(item["data_compromisso"], "%Y-%m-%d").date()
+                    is_concluido = item.get("concluido", False)
+
+                    if is_concluido:
+                        calc_status = "concluido"
+                    elif dt_comp < hoje:
+                        calc_status = "atrasado"
+                    else:
+                        calc_status = "pendente"
+
+                    item["_status_calc"] = calc_status
+                    item["_dt_comp"] = dt_comp
+
+                    # Filtro por Busca (Título/Descrição)
+                    if termo and not (termo in item.get("titulo", "").lower() or termo in (item.get("descricao") or "").lower()):
+                        continue
+
+                    # Filtro por Status
+                    if status_f != "todos" and calc_status != status_f:
+                        continue
+
+                    # Filtro por Período
+                    if dt_ini and item["data_compromisso"] < dt_ini:
+                        continue
+                    if dt_fim and item["data_compromisso"] > dt_fim:
+                        continue
+
+                    lembretes_filtrados.append(item)
+
+                # Separação por Abas/Seções
+                pendentes_atrasados = [l for l in lembretes_filtrados if l["_status_calc"] in ["pendente", "atrasado"]]
+                concluidos = [l for l in lembretes_filtrados if l["_status_calc"] == "concluido"]
+
+                with container_cards:
+                    with ui.tabs().classes("w-full border-b") as tabs:
+                        tab_pendentes = ui.tab(f"⏳ Pendentes & Atrasados ({len(pendentes_atrasados)})")
+                        tab_concluidos = ui.tab(f"✅ Concluídos ({len(concluidos)})")
+
+                    with ui.tab_panels(tabs, value=tab_pendentes).classes("w-full bg-transparent pt-4 gap-4"):
+                        
+                        # ABA 1: PENDENTES & ATRASADOS
+                        with ui.tab_panel(tab_pendentes).classes("p-0 w-full gap-4"):
+                            if not pendentes_atrasados:
+                                with ui.card().classes("w-full p-8 text-center bg-slate-50 border border-dashed rounded-xl"):
+                                    ui.label("🎉 Nenhum compromisso pendente no momento!").classes("text-slate-500 font-bold text-base")
+                            else:
+                                for item in pendentes_atrasados:
+                                    renderizar_card_lembrete(item)
+
+                        # ABA 2: CONCLUÍDOS
+                        with ui.tab_panel(tab_concluidos).classes("p-0 w-full gap-4"):
+                            if not concluidos:
+                                with ui.card().classes("w-full p-8 text-center bg-slate-50 border border-dashed rounded-xl"):
+                                    ui.label("Nenhum compromisso concluído nesta visualização.").classes("text-slate-500 font-bold text-base")
+                            else:
+                                for item in concluidos:
+                                    renderizar_card_lembrete(item)
+
+            def renderizar_card_lembrete(item):
+                status = item["_status_calc"]
+                dt_comp_str = item["_dt_comp"].strftime("%d/%m/%Y")
+                l_id = item["id"]
+                is_concluido = item.get("concluido", False)
+
+                # Estilização visual por status
+                if status == "atrasado":
+                    border_color = "border-l-8 border-l-red-500 border-red-200 bg-red-50/30"
+                    badge_bg = "bg-red-100 text-red-800 border-red-300"
+                    badge_icon = "warning"
+                    status_text = "Atrasado"
+                elif status == "concluido":
+                    border_color = "border-l-8 border-l-emerald-500 border-slate-200 bg-slate-50/80"
+                    badge_bg = "bg-emerald-100 text-emerald-800 border-emerald-300"
+                    badge_icon = "check_circle"
+                    status_text = "Concluído"
+                else:
+                    border_color = "border-l-8 border-l-purple-600 border-purple-200 bg-white"
+                    badge_bg = "bg-purple-100 text-purple-800 border-purple-300"
+                    badge_icon = "schedule"
+                    status_text = "Pendente"
+
+                with ui.card().classes(f"w-full p-4 border shadow-sm rounded-xl transition-all hover:shadow-md mb-3 {border_color}"):
+                    with ui.row().classes("w-full items-start justify-between gap-3"):
+                        
+                        # Lado Esquerdo: Checkbox + Título + Descrição + Metadados
+                        with ui.row().classes("items-start gap-3 flex-1"):
+                            ui.checkbox(
+                                value=is_concluido,
+                                on_change=lambda e, lid=l_id, st=is_concluido: alternar_status_conclusao(lid, st)
+                            ).props("size=md color=purple").classes("mt-0.5")
+
+                            with ui.column().classes("gap-1 flex-1"):
+                                title_class = "line-through text-slate-400" if is_concluido else "text-slate-800 font-bold"
+                                ui.label(item["titulo"]).classes(f"text-lg sm:text-xl {title_class}")
+
+                                if item.get("descricao"):
+                                    ui.label(item["descricao"]).classes("text-sm text-slate-600 leading-relaxed")
+
+                                with ui.row().classes("items-center gap-4 mt-2 text-xs font-semibold text-slate-500 flex-wrap"):
+                                    ui.label(f"📅 Compromisso: {dt_comp_str}").classes("bg-slate-100 px-2.5 py-1 rounded-md border")
+                                    
+                                    if item.get("tem_lembrete"):
+                                        ui.label(
+                                            f"⏰ Alerta: {item.get('antecedencia_dias')}d antes às {item.get('horario_lembrete')}"
+                                        ).classes("bg-purple-50 text-purple-700 px-2.5 py-1 rounded-md border border-purple-200")
+
+                        # Lado Direito: Badge de Status + Ações
+                        with ui.column().classes("items-end gap-2"):
+                            with ui.row().classes(f"items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold {badge_bg}"):
+                                ui.icon(badge_icon, size="16px")
+                                ui.label(status_text)
+
+                            ui.button(
+                                icon="delete",
+                                on_click=lambda lid=l_id: deletar_lembrete(lid)
+                            ).props("flat round dense color=negative").classes("mt-1 hover:bg-red-50").tooltip("Excluir Lembrete")
+
+            # Listeners dos filtros para recarregar a lista instantaneamente
+            filter_busca.on("update:model-value", carregar_e_renderizar_lembretes)
+            filter_status.on("update:model-value", carregar_e_renderizar_lembretes)
+            filter_data_inicio.on("update:model-value", carregar_e_renderizar_lembretes)
+            filter_data_fim.on("update:model-value", carregar_e_renderizar_lembretes)
+
+            # Carga Inicial dos Lembretes
+            carregar_e_renderizar_lembretes()
 
 
 @app.get("/ping")
