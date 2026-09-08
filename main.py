@@ -1785,8 +1785,12 @@ def lembretes_page():
                 select_antecedencia.value = item.get("antecedencia_dias", 1)
                 input_horario.value = item.get("horario_lembrete", "12:00")
 
-                # Sobe a tela até o formulário de edição (Requisito 4)
-                ui.run_javascript(f'document.getElementById("{topo_ancora.id}").scrollIntoView({{behavior: "smooth"}});')
+                # 1. Sobe a tela suavemente até a âncora/topo
+                ui.run_javascript(f'document.getElementById("{topo_ancora.id}").scrollIntoView({{behavior: "smooth", block: "start"}});')
+
+                # 2. Seleciona e foca no campo de Título para que o teclado/foco abra no local correto
+                ui.run_javascript(f'document.getElementById("{input_titulo.id}").focus();')
+
 
             # Function para atualizar status de conclusão
             def alternar_status_conclusao(lembrete_id: int, status_atual: bool):
