@@ -1785,11 +1785,11 @@ def lembretes_page():
                 select_antecedencia.value = item.get("antecedencia_dias", 1)
                 input_horario.value = item.get("horario_lembrete", "12:00")
 
-                # 1. Sobe a tela suavemente até a âncora/topo
-                ui.run_javascript(f'document.getElementById("{topo_ancora.id}").scrollIntoView({{behavior: "smooth", block: "start"}});')
+                # 1. Rola a janela até o topo da página suavemente
+                ui.run_javascript('window.scrollTo({top: 0, behavior: "smooth"});')
 
-                # 2. Seleciona e foca no campo de Título para que o teclado/foco abra no local correto
-                ui.run_javascript(f'document.getElementById("{input_titulo.id}").focus();')
+                # 2. Alternativa nativa do NiceGUI para focar no campo de título:
+                input_titulo.run_method('focus')
 
 
             # Function para atualizar status de conclusão
@@ -1968,6 +1968,8 @@ def ping():
 
 
 ui.run(
+    title="Agendamentos Pessoais",
+    favicon="icon.png",    
     host="0.0.0.0",
     port=PORT,
     storage_secret=os.getenv("STORAGE_SECRET", "chave_secreta_padrao_substituir_em_producao"),
