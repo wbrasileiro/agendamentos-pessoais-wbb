@@ -1967,9 +1967,14 @@ def ping():
     return {"status": "ok"}
 
 
+from nicegui import app, ui
+
+# Disponibiliza os arquivos da pasta atual na rota estática '/static'
+app.add_static_files('/static', '.')
+
 ui.run(
     title="Agendamentos Pessoais",
-    favicon="icon.png",    
+    favicon="/static/icon.png",  # Aponta para a rota estática criada acima
     host="0.0.0.0",
     port=PORT,
     storage_secret=os.getenv("STORAGE_SECRET", "chave_secreta_padrao_substituir_em_producao"),
