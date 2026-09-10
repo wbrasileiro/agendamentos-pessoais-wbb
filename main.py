@@ -1968,9 +1968,24 @@ def ping():
 
 
 from nicegui import app, ui
+import os
 
-# Disponibiliza os arquivos da pasta atual na rota estática '/static'
+# Expõe os arquivos da raiz como arquivos estáticos
 app.add_static_files('/static', '.')
+
+# Adiciona o link do manifesto, ícone da Apple e registra o Service Worker em todas as páginas
+ui.add_head_html('''
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icon.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js');
+      }
+    </script>
+''', shared=True)
 
 ui.run(
     title="Agendamentos Pessoais",
