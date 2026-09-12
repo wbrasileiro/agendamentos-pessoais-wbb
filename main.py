@@ -1977,7 +1977,7 @@ app.add_static_files('/static', '.')
 # Adiciona o link do manifesto, ícone da Apple e registra o Service Worker em todas as páginas
 ui.add_head_html('''
     <link rel="manifest" href="/static/manifest.json">
-    <link rel="apple-touch-icon" href="/static/agendamento.ico">
+    <link rel="apple-touch-icon" href="/static/icon.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1990,7 +1990,7 @@ ui.add_head_html('''
 
 ui.run(
     title="Agendamentos Pessoais",
-    favicon="/static/agendamento.ico",  # Aponta para a rota estática criada acima
+    favicon="/static/icon.png",  # Aponta para a rota estática criada acima
     host="0.0.0.0",
     port=PORT,
     storage_secret=os.getenv("STORAGE_SECRET", "chave_secreta_padrao_substituir_em_producao"),
