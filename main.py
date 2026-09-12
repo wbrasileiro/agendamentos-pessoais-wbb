@@ -1135,6 +1135,14 @@ def home_page():
                 input_props = "outlined bg-slate-50 input-class=text-base"
 
                 # Campos Principais
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-5"):
+                    # Campo de Seleção de Categoria
+                    select_categoria = ui.select(
+                        options=opcoes_categorias,
+                        value=categoria_padrao_id,
+                        label="Categoria"
+                    ).props(input_props).classes("w-full")
+
                 with ui.column().classes("w-full gap-5"):
                     input_empresa = ui.input(
                         "Empresa boleto / Nome do cliente",
@@ -1152,13 +1160,6 @@ def home_page():
                             "Data de vencimento"
                         ).props(f"{input_props} type=date").classes("w-full")
 
-                    with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-5"):
-                        # Campo de Seleção de Categoria
-                        select_categoria = ui.select(
-                            options=opcoes_categorias,
-                            value=categoria_padrao_id,
-                            label="Categoria"
-                        ).props(input_props).classes("w-full")
 
                         # Status inicial com opções em Title Case (Pendente)
                         select_status = ui.select(
@@ -1976,7 +1977,7 @@ app.add_static_files('/static', '.')
 # Adiciona o link do manifesto, ícone da Apple e registra o Service Worker em todas as páginas
 ui.add_head_html('''
     <link rel="manifest" href="/static/manifest.json">
-    <link rel="apple-touch-icon" href="/static/icon.png">
+    <link rel="apple-touch-icon" href="/static/agendamento.ico">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1989,7 +1990,7 @@ ui.add_head_html('''
 
 ui.run(
     title="Agendamentos Pessoais",
-    favicon="/static/icon.png",  # Aponta para a rota estática criada acima
+    favicon="/static/agendamento.ico",  # Aponta para a rota estática criada acima
     host="0.0.0.0",
     port=PORT,
     storage_secret=os.getenv("STORAGE_SECRET", "chave_secreta_padrao_substituir_em_producao"),
