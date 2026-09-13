@@ -195,14 +195,12 @@ def menu_drawer():
                             ui.label("Lembretes").classes("font-bold text-sm")
 
                 # Tarefas
-                with ui.button(on_click=lambda: navegar("/tarefas")).props("flat no-caps align=left").classes(
-                    "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
-                ):
-                    with ui.row().classes("items-center justify-between w-full"):
-                        with ui.row().classes("items-center gap-3"):
+                    with ui.button(on_click=lambda: navegar("/tarefas")).props("flat no-caps align=left").classes(
+                        "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
+                    ):
+                        with ui.row().classes("items-center gap-3 w-full"):
                             ui.icon("check_box", size="20px").classes("text-purple-600")
                             ui.label("Tarefas").classes("font-bold text-sm")
-                        ui.label("Em breve").classes("text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full")
 
                 # Anotações
                 with ui.button(on_click=lambda: navegar("/anotacoes")).props("flat no-caps align=left").classes(
@@ -1961,6 +1959,369 @@ def lembretes_page():
 
             # Carga Inicial
             carregar_e_renderizar_lembretes()
+
+
+from datetime import datetime
+import asyncio
+from nicegui import ui, app
+
+# ==========================================
+# TELA DE UTILITÁRIOS - TAREFAS / CHECKLIST
+# ==========================================
+@ui.page("/tarefas")
+def tarefas_page():
+    if not app.storage.user.get("user_id"):
+        ui.navigate.to("/login")
+        return
+
+    drawer = menu_drawer()
+    cabecalho_app(drawer)
+    user_id = app.storage.user.get("user_id")
+
+    # Estado local para controle de edição e lista temporária de itens
+    tarefa_em_edicao = {'id': None}
+    itens_temporarios = []  # Estrutura: [{'texto': str, 'concluido': bool}]
+
+    # Âncora no topo para scroll suave ao editar
+    topo_ancora = ui.element('div').classes('w-full')
+
+    with ui.column().classes("w-full max-w-5xl mx-auto p-3 sm:p-6 gap-8 font-sans pb-32"):
+
+        # ====================================================
+        # SEÇÃO 1: CADASTRO / EDIÇÃO DE TAREFAS (FORMULÁRIO)
+        # ====================================================
+        with ui.card().classes("w-full p-4 sm:p-6 border-2 border-purple-200 bg-purple-50/20 shadow-md rounded-2xl gap-5"):
+            with ui.row().classes("w-full items-center justify-between border-b border-purple-100 pb-3"):
+                with ui.row().classes("items-center gap-2"):
+                    ui.icon("check_box", size="28px").classes("text-purple-600")
+                    titulo_formulario = ui.label("Cadastrar Nova Lista de Tarefas").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+
+            input_props = "outlined bg-white input-class=text-base"
+
+            with ui.column().classes("w-full gap-4"):
+                # Campo Título
+                input_titulo = ui.input(
+                    "Título da Tarefa / Lista", 
+                    placeholder="Ex: Compras do Mês, Checklist do Projeto..."
+                ).props(input_props).classes("w-full")
+
+                # Área de Adição Dinâmica de Itens
+                ui.label("Itens do Checklist").classes("text-sm font-bold text-slate-700 mt-2")
+                
+                with ui.row().classes("w-full items-center gap-2"):
+                    input_novo_item = ui.input(
+                        "Adicionar Item", 
+                        placeholder="Digite o item e pressione Enter ou clique em Adicionar"
+                    ).props(input_props).classes("flex-1")
+                    
+                    def adicionar_item_lista():
+                        txt = input_novo_item.value.strip() if input_novo_item.value else ""
+                        if txt:
+                            itens_temporarios.append({'texto': txt, 'concluido': False})
+                            input_novo_item.value = ""
+                            atualizar_view_itens_temporarios()
+                        else:
+                            ui.notify("Digite o texto do item antes de adicionar!", color="warning")
+
+                    input_novo_item.on('keydown.enter', adicionar_item_lista)
+                    ui.button("➕ Adicionar", on_click=adicionar_item_lista).classes(
+                        "bg-purple-600 hover:bg-purple-700 text-white font-bold h-[56px] px-5 rounded-xl shadow"
+                    )
+
+                # Container visual para preview/edição dos itens adicionados no formulário
+                container_preview_itens = ui.column().classes("w-full gap-2 p-3 bg-white border border-purple-100 rounded-xl")
+
+                def atualizar_view_itens_temporarios():
+                    container_preview_itens.clear()
+                    with container_preview_itens:
+                        if not itens_temporarios:
+                            ui.label("Nenhum item adicionado ainda.").classes("text-xs text-slate-400 italic")
+                        else:
+                            for idx, item in enumerate(itens_temporarios):
+                                with ui.row().classes("w-full items-center justify-between p-2 bg-slate-50 border rounded-lg gap-2"):
+                                    def alternar_check(e, index=idx):
+                                        itens_temporarios[index]['concluido'] = e.value
+
+                                    ui.checkbox(
+                                        value=item['concluido'], 
+                                        on_change=alternar_check
+                                    ).classes("text-slate-800")
+
+                                    def atualizar_texto_item(e, index=idx):
+                                        itens_temporarios[index]['texto'] = e.value.strip()
+
+                                    ui.input(
+                                        value=item['texto'],
+                                        on_change=atualizar_texto_item
+                                    ).props("dense borderless input-class=text-sm font-medium").classes("flex-1 bg-white px-2 rounded border border-slate-200")
+
+                                    def remover_item_temp(index=idx):
+                                        itens_temporarios.pop(index)
+                                        atualizar_view_itens_temporarios()
+
+                                    ui.button(icon="delete", on_click=remover_item_temp).props("flat round dense color=negative").tooltip("Remover item")
+
+                atualizar_view_itens_temporarios()
+
+            def limpar_formulario():
+                tarefa_em_edicao['id'] = None
+                itens_temporarios.clear()
+                titulo_formulario.set_text("Cadastrar Nova Lista de Tarefas")
+                btn_salvar.set_text("💾 Salvar Tarefa")
+                btn_cancelar.set_visibility(False)
+                input_titulo.value = ""
+                input_novo_item.value = ""
+                atualizar_view_itens_temporarios()
+
+            async def salvar_tarefa():
+                titulo_val = input_titulo.value.strip() if input_titulo.value else ""
+
+                if not titulo_val:
+                    ui.notify("Por favor, informe o título da tarefa!", color="warning", size="lg")
+                    return
+
+                itens_validos = [it for it in itens_temporarios if it.get('texto', '').strip()]
+
+                if not itens_validos:
+                    ui.notify("Adicione pelo menos um item válido à lista de tarefas!", color="warning", size="lg")
+                    return
+
+                try:
+                    payload = {
+                        "user_id": user_id,
+                        "titulo": titulo_val,
+                        "itens": itens_validos
+                    }
+
+                    if tarefa_em_edicao['id']:
+                        supabase.table("tarefas").update(payload).eq("id", tarefa_em_edicao['id']).execute()
+                        ui.notify("✅ Tarefa atualizada com sucesso!", color="positive", size="lg")
+                    else:
+                        supabase.table("tarefas").insert(payload).execute()
+                        ui.notify("✅ Tarefa salva com sucesso!", color="positive", size="lg")
+
+                    limpar_formulario()
+                    carregar_e_renderizar_tarefas()
+                    
+                    ui.run_javascript(f'document.getElementById("{topo_ancora.id}").scrollIntoView({{behavior: "smooth"}});')
+
+                except Exception as err:
+                    ui.notify(f"❌ Erro ao salvar tarefa: {err}", color="negative", size="lg")
+
+            with ui.row().classes("w-full gap-3 mt-2"):
+                btn_salvar = ui.button("💾 Salvar Tarefa", on_click=salvar_tarefa).classes(
+                    "bg-purple-600 hover:bg-purple-700 text-white font-bold text-base flex-1 py-3 rounded-xl shadow transition-all"
+                )
+                btn_cancelar = ui.button("Cancelar", on_click=limpar_formulario).classes(
+                    "bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 px-6 rounded-xl transition-all"
+                )
+                btn_cancelar.set_visibility(False)
+
+        # ====================================================
+        # SEÇÃO 2: GESTÃO E CONSULTA DE TAREFAS / CARDS
+        # ====================================================
+        with ui.column().classes("w-full gap-4 mt-4"):
+            with ui.row().classes("w-full items-center gap-2 border-b pb-2"):
+                ui.icon("task", size="28px").classes("text-slate-700")
+                ui.label("Minhas Tarefas e Checklists").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+
+            # Filtros
+            with ui.expansion("🔍 Filtros de Busca", icon="search").classes(
+                "w-full bg-slate-100 border border-slate-200 rounded-2xl shadow-sm text-slate-700 font-bold"
+            ):
+                with ui.grid().classes("w-full grid-cols-1 sm:grid-cols-2 gap-3 p-2"):
+                    filter_busca = ui.input("Buscar por título ou item", placeholder="Digite para buscar...").props("outlined bg-white dense").classes("w-full")
+                    
+                    filter_status = ui.select(
+                        {"todos": "Todas", "pendentes": "Em Andamento", "concluidas": "100% Concluídas"},
+                        value="todos", label="Status das tarefas"
+                    ).props("outlined bg-white dense").classes("w-full")
+
+            container_cards = ui.column().classes("w-full gap-6 mt-2")
+
+        def preparar_edicao(item: dict):
+            tarefa_em_edicao['id'] = item['id']
+            titulo_formulario.set_text("✏️ Editar Tarefa")
+            btn_salvar.set_text("🔄 Atualizar Tarefa")
+            btn_cancelar.set_visibility(True)
+
+            input_titulo.value = item.get("titulo", "")
+            
+            itens_temporarios.clear()
+            for it in item.get("itens", []):
+                itens_temporarios.append({'texto': it['texto'], 'concluido': it.get('concluido', False)})
+            
+            atualizar_view_itens_temporarios()
+
+            ui.run_javascript('window.scrollTo({top: 0, behavior: "smooth"});')
+            input_titulo.run_method('focus')
+
+        def confirmar_exclusao(tarefa_id: int):
+            with ui.dialog() as dialog, ui.card().classes("p-6 gap-4 border border-slate-200 rounded-2xl max-w-sm w-full"):
+                ui.label("⚠️ Confirmar exclusão").classes("text-lg font-bold text-slate-800")
+                ui.label("Tem certeza que deseja excluir esta tarefa e todos os seus itens?").classes("text-sm text-slate-600")
+                
+                with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                    ui.button("Cancelar", on_click=dialog.close).props("flat").classes("text-slate-600")
+                    
+                    def efetuar_delecao():
+                        try:
+                            supabase.table("tarefas").delete().eq("id", tarefa_id).execute()
+                            ui.notify("Tarefa removida com sucesso!", color="info")
+                            dialog.close()
+                            carregar_e_renderizar_tarefas()
+                        except Exception as e:
+                            ui.notify(f"Erro ao remover tarefa: {e}", color="negative")
+
+                    ui.button("Excluir", on_click=efetuar_delecao).props("unelevated color=negative").classes("rounded-lg")
+            dialog.open()
+
+        def salvar_status_silencioso(tarefa_id: int, lista_itens: list):
+            try:
+                supabase.table("tarefas").update({"itens": lista_itens}).eq("id", tarefa_id).execute()
+            except Exception as e:
+                ui.notify(f"Erro ao salvar status do item: {e}", color="negative")
+
+        # Renderização Dinâmica dos Cards
+        def carregar_e_renderizar_tarefas():
+            container_cards.clear()
+
+            res = supabase.table("tarefas").select("*").eq("user_id", user_id).order("id", desc=True).execute()
+            todas_tarefas = res.data or []
+
+            termo = filter_busca.value.lower().strip() if filter_busca.value else ""
+            status_f = filter_status.value
+
+            tarefas_pendentes = []
+            tarefas_concluidas = []
+
+            for item in todas_tarefas:
+                itens = item.get("itens", [])
+                total_itens = len(itens)
+                concluidos = sum(1 for i in itens if i.get("concluido"))
+                
+                is_totalmente_concluido = (total_itens > 0 and concluidos == total_itens)
+
+                texto_itens_concatenado = " ".join([i.get("texto", "") for i in itens]).lower()
+                if termo and not (termo in item.get("titulo", "").lower() or termo in texto_itens_concatenado):
+                    continue
+
+                if status_f == "concluidas" and not is_totalmente_concluido:
+                    continue
+                if status_f == "pendentes" and is_totalmente_concluido:
+                    continue
+
+                if is_totalmente_concluido:
+                    tarefas_concluidas.append(item)
+                else:
+                    tarefas_pendentes.append(item)
+
+            with container_cards:
+                if not tarefas_pendentes and not tarefas_concluidas:
+                    with ui.card().classes("w-full p-8 text-center bg-slate-50 border border-dashed rounded-xl"):
+                        ui.label("Nenhuma tarefa encontrada.").classes("text-slate-500 font-bold text-base")
+                else:
+                    if tarefas_pendentes and status_f != "concluidas":
+                        with ui.column().classes("w-full gap-3"):
+                            with ui.row().classes("items-center gap-2 border-b border-purple-200 pb-1"):
+                                ui.icon("pending_actions", size="20px").classes("text-purple-600")
+                                ui.label(f"Em Andamento ({len(tarefas_pendentes)})").classes("text-lg font-bold text-slate-700")
+                            for item in tarefas_pendentes:
+                                renderizar_card_tarefa(item)
+
+                    if tarefas_concluidas and status_f != "pendentes":
+                        with ui.column().classes("w-full gap-3 mt-2"):
+                            with ui.row().classes("items-center gap-2 border-b border-emerald-200 pb-1"):
+                                ui.icon("check_circle", size="20px").classes("text-emerald-600")
+                                ui.label(f"Concluídas ({len(tarefas_concluidas)})").classes("text-lg font-bold text-slate-700")
+                            for item in tarefas_concluidas:
+                                renderizar_card_tarefa(item)
+
+        def renderizar_card_tarefa(item):
+            t_id = item["id"]
+            itens = item.get("itens", [])
+
+            with ui.expansion().classes("w-full border shadow-sm rounded-xl transition-all hover:shadow-md mb-2 bg-white border-purple-200 border-l-8 border-l-purple-600") as expansion:
+                
+                with expansion.add_slot('header'):
+                    with ui.row().classes("w-full items-center justify-between pr-2 gap-2"):
+                        with ui.column().classes("gap-0.5 flex-1"):
+                            lbl_titulo = ui.label(item["titulo"]).classes("text-lg sm:text-xl text-slate-800 font-bold")
+                            lbl_resumo_itens = ui.label("").classes("text-xs font-semibold text-slate-500")
+
+                        with ui.row().classes("items-center gap-2"):
+                            container_badge = ui.row().classes("items-center gap-1 px-3 py-1 rounded-full border text-xs font-bold")
+                            icon_badge = ui.icon("").classes("text-sm")
+                            lbl_badge = ui.label("")
+
+                            ui.button(
+                                icon="edit",
+                                on_click=lambda e, it=item: preparar_edicao(it)
+                            ).props("flat round dense color=primary").classes("hover:bg-blue-50").tooltip("Editar Tarefa")
+
+                            ui.button(
+                                icon="delete",
+                                on_click=lambda e, tid=t_id: confirmar_exclusao(tid)
+                            ).props("flat round dense color=negative").classes("hover:bg-red-50").tooltip("Excluir Tarefa")
+
+                def atualizar_estado_visual_card():
+                    tot = len(itens)
+                    conc = sum(1 for i in itens if i.get("concluido"))
+                    tudo_pronto = (tot > 0 and conc == tot)
+
+                    lbl_resumo_itens.set_text(f"📋 Total de Itens: {tot}")
+
+                    if tudo_pronto:
+                        lbl_titulo.classes(replace="line-through text-slate-400 font-bold")
+                        container_badge.classes(replace="items-center gap-1 px-3 py-1 rounded-full border text-xs font-bold bg-emerald-100 text-emerald-800 border-emerald-300")
+                        icon_badge.props("name=check_circle")
+                        lbl_badge.set_text("Concluída")
+                    else:
+                        lbl_titulo.classes(replace="text-slate-800 font-bold")
+                        container_badge.classes(replace="items-center gap-1 px-3 py-1 rounded-full border text-xs font-bold bg-purple-100 text-purple-800 border-purple-300")
+                        icon_badge.props("name=pending_actions")
+                        lbl_badge.set_text(f"{conc}/{tot} Concluídos")
+
+                atualizar_estado_visual_card()
+
+                with ui.column().classes("w-full p-4 gap-3 bg-white/70 border-t border-slate-100"):
+                    ui.label("Checklist de Itens:").classes("text-xs font-bold text-slate-500 uppercase tracking-wide")
+                    
+                    for index, it in enumerate(itens):
+                        chk_label = ui.checkbox(
+                            text=it.get("texto"),
+                            value=it.get("concluido", False)
+                        )
+                        
+                        def aplicar_estilo_chk(cb_element, esta_concluido):
+                            if esta_concluido:
+                                cb_element.style("text-decoration: line-through; opacity: 0.6;")
+                            else:
+                                cb_element.style("text-decoration: none; opacity: 1.0;")
+
+                        aplicar_estilo_chk(chk_label, it.get("concluido", False))
+
+                        def ao_mudar_chk(e, idx=index, cb_elem=chk_label):
+                            novo_val = e.value
+                            itens[idx]["concluido"] = novo_val
+                            
+                            # Atualiza a interface local e o cabeçalho sem dar refresh no DOM
+                            aplicar_estilo_chk(cb_elem, novo_val)
+                            atualizar_estado_visual_card()
+                            salvar_status_silencioso(t_id, itens)
+                            
+                            # Se 100% das tarefas forem finalizadas, recarrega para transferir para a seção "Concluídas"
+                            tot = len(itens)
+                            conc = sum(1 for i in itens if i.get("concluido"))
+                            if conc == tot:
+                                carregar_e_renderizar_tarefas()
+
+                        chk_label.on_value_change(ao_mudar_chk)
+
+        filter_busca.on("update:model-value", carregar_e_renderizar_tarefas)
+        filter_status.on("update:model-value", carregar_e_renderizar_tarefas)
+
+        carregar_e_renderizar_tarefas()
 
 
 @app.get("/ping")
