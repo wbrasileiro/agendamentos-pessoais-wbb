@@ -2347,7 +2347,11 @@ from zoneinfo import ZoneInfo
 import asyncio
 from nicegui import ui, app
 
-# Helper para converter e formatar a data recebida no fuso de Brasília
+try:
+    from database import supabase
+except ImportError:
+    pass
+
 def formatar_data_brasilia(data_iso_str: str) -> str:
     if not data_iso_str:
         return ""
@@ -2382,40 +2386,58 @@ def anotacoes_page():
     ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>')
 
     # ====================================================
-    # ENGINE JS DO CANVAS ESTILO EXCEL / OFFICE
+    # ENGINE JS DO CANVAS ESTILO EXCEL / OFFICE + HISTÓRICO + TELA CHEIA
     # ====================================================
     ui.add_body_html('''
+        <!-- Modal Lightbox para Imagens em Tela Cheia -->
+        <div id="image-modal-overlay" onclick="window.fecharModalImagem()" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.9); z-index:99999; align-items:center; justify-content:center; cursor:pointer;">
+            <span onclick="window.fecharModalImagem()" style="position:absolute; top:20px; right:25px; color:#fff; font-size:35px; font-weight:bold; cursor:pointer;">&times;</span>
+            <img id="image-modal-img" style="max-width:95vw; max-height:95vh; object-fit:contain; border-radius:8px;" />
+        </div>
+
         <script>
             window.fCanvas = null;
+            window.canvasOriginalDimensions = { width: 800, height: 520 };
             window.sketchpadState = {
                 color: '#2563eb',
                 bgColor: '#ffffff',
                 lineWidth: 2
             };
 
-            // Ajusta as dimensões do Canvas para ocupar 100% no Fullscreen ou normal
-            window.ajustarTamanhoCanvas = function() {
-                if (!window.fCanvas) return;
-                
-                const container = document.getElementById('sketchpad_container');
-                if (!container) return;
+            // HISTÓRICO PARA DESFAZER / REFAZER
+            window.canvasUndoStack = [];
+            window.canvasRedoStack = [];
+            window.isCanvasStateLocked = false;
 
-                if (document.fullscreenElement || document.webkitFullscreenElement) {
-                    const larguraTela = window.innerWidth;
-                    const alturaTela = window.innerHeight;
-                    window.fCanvas.setWidth(larguraTela);
-                    window.fCanvas.setHeight(alturaTela);
-                } else {
-                    const containerWidth = container.clientWidth || 800;
-                    window.fCanvas.setWidth(containerWidth);
-                    window.fCanvas.setHeight(520);
-                }
-                window.fCanvas.renderAll();
+            window.salvarEstadoCanvas = function() {
+                if(!window.fCanvas || window.isCanvasStateLocked) return;
+                const jsonState = JSON.stringify(window.fCanvas.toDatalessJSON());
+                window.canvasUndoStack.push(jsonState);
+                window.canvasRedoStack = [];
             };
 
-            document.addEventListener('fullscreenchange', window.ajustarTamanhoCanvas);
-            document.addEventListener('webkitfullscreenchange', window.ajustarTamanhoCanvas);
-            window.addEventListener('resize', window.ajustarTamanhoCanvas);
+            window.desfazerCanvas = function() {
+                if(!window.fCanvas || window.canvasUndoStack.length <= 1) return;
+                window.isCanvasStateLocked = true;
+                const estadoAtual = window.canvasUndoStack.pop();
+                window.canvasRedoStack.push(estadoAtual);
+                const estadoAnterior = window.canvasUndoStack[window.canvasUndoStack.length - 1];
+                window.fCanvas.loadFromJSON(estadoAnterior, function() {
+                    window.fCanvas.renderAll();
+                    window.isCanvasStateLocked = false;
+                });
+            };
+
+            window.refazerCanvas = function() {
+                if(!window.fCanvas || window.canvasRedoStack.length === 0) return;
+                window.isCanvasStateLocked = true;
+                const proximoEstado = window.canvasRedoStack.pop();
+                window.canvasUndoStack.push(proximoEstado);
+                window.fCanvas.loadFromJSON(proximoEstado, function() {
+                    window.fCanvas.renderAll();
+                    window.isCanvasStateLocked = false;
+                });
+            };
 
             window.inicializarCanvasAnotacoes = function() {
                 const el = document.getElementById('sketchpad');
@@ -2425,14 +2447,14 @@ def anotacoes_page():
                     window.fCanvas.dispose();
                 }
 
-                const container = document.getElementById('sketchpad_container');
-                const containerWidth = container ? container.clientWidth : 800;
+                const containerWidth = el.parentElement.clientWidth || 800;
+                window.canvasOriginalDimensions = { width: containerWidth, height: 520 };
 
                 window.fCanvas = new fabric.Canvas('sketchpad', {
                     width: containerWidth,
                     height: 520,
                     backgroundColor: window.sketchpadState.bgColor,
-                    isDrawingMode: false
+                    isDrawingMode: true  // MODO LÁPIS POR PADRÃO
                 });
 
                 window.fCanvas.freeDrawingBrush.color = window.sketchpadState.color;
@@ -2443,7 +2465,14 @@ def anotacoes_page():
                     upperCanvas.style.touchAction = 'none';
                 }
 
-                window.ajustarTamanhoCanvas();
+                // REGISTRO DE HISTÓRICO
+                window.canvasUndoStack = [];
+                window.canvasRedoStack = [];
+                window.salvarEstadoCanvas();
+
+                window.fCanvas.on('object:added', function() { window.salvarEstadoCanvas(); });
+                window.fCanvas.on('object:modified', function() { window.salvarEstadoCanvas(); });
+                window.fCanvas.on('object:removed', function() { window.salvarEstadoCanvas(); });
             };
 
             window.setCanvasMode = function(mode) {
@@ -2464,6 +2493,7 @@ def anotacoes_page():
                             if(activeObj.fill && activeObj.fill !== 'transparent') activeObj.set('fill', color);
                         }
                         window.fCanvas.renderAll();
+                        window.salvarEstadoCanvas();
                     }
                 }
             };
@@ -2478,7 +2508,10 @@ def anotacoes_page():
             window.alterarCorFundoCanvas = function(color) {
                 window.sketchpadState.bgColor = color;
                 if(window.fCanvas) {
-                    window.fCanvas.setBackgroundColor(color, window.fCanvas.renderAll.bind(window.fCanvas));
+                    window.fCanvas.setBackgroundColor(color, function() {
+                        window.fCanvas.renderAll();
+                        window.salvarEstadoCanvas();
+                    });
                 }
             };
 
@@ -2495,7 +2528,6 @@ def anotacoes_page():
 
                 let obj = null;
 
-                // --- 1. LINHAS E CONECTORES ---
                 if (type === 'line-straight') {
                     obj = new fabric.Line([0, 0, 120, 0], { stroke: color, strokeWidth: strokeW });
                 } 
@@ -2505,17 +2537,11 @@ def anotacoes_page():
                 else if (type === 'line-dashed') {
                     obj = new fabric.Line([0, 0, 120, 0], { stroke: color, strokeWidth: strokeW, strokeDashArray: [6, 6] });
                 } 
-                else if (type === 'line-elbow') {
-                    const p1 = new fabric.Polyline([
-                        {x: 0, y: 0},
-                        {x: 60, y: 0},
-                        {x: 60, y: 60},
-                        {x: 120, y: 60}
+                else if (type === 'line-elbow') { 
+                    obj = new fabric.Polyline([
+                        {x: 0, y: 0}, {x: 60, y: 0}, {x: 60, y: 60}, {x: 120, y: 60}
                     ], { fill: 'transparent', stroke: color, strokeWidth: strokeW });
-                    obj = p1;
                 }
-
-                // --- 2. SETAS (MÚLTIPLAS DIREÇÕES E CURVAS) ---
                 else if (type === 'arrow-right') {
                     const l = new fabric.Line([0, 0, 100, 0], { stroke: color, strokeWidth: strokeW });
                     const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: -7, angle: 90 });
@@ -2542,50 +2568,40 @@ def anotacoes_page():
                     const t2 = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: -7, angle: 90 });
                     obj = new fabric.Group([l, t1, t2]);
                 }
-                else if (type === 'arrow-elbow') {
+                else if (type === 'arrow-elbow') { 
                     const p = new fabric.Polyline([
-                        {x: 0, y: 0},
-                        {x: 50, y: 0},
-                        {x: 50, y: 50},
-                        {x: 100, y: 50}
+                        {x: 0, y: 0}, {x: 50, y: 0}, {x: 50, y: 50}, {x: 100, y: 50}
                     ], { fill: 'transparent', stroke: color, strokeWidth: strokeW });
                     const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: 43, angle: 90 });
                     obj = new fabric.Group([p, t]);
                 }
-                else if (type === 'arrow-block') {
-                    const path = new fabric.Path('M 0 20 L 60 20 L 60 0 L 100 30 L 60 60 L 60 40 L 0 40 Z', {
+                else if (type === 'arrow-block') { 
+                    obj = new fabric.Path('M 0 20 L 60 20 L 60 0 L 100 30 L 60 60 L 60 40 L 0 40 Z', {
                         fill: 'transparent', stroke: color, strokeWidth: strokeW
                     });
-                    obj = path;
                 }
-
-                // --- 3. DIAGRAMAS E FLUXOGRAMAS ---
-                else if (type === 'diag-process') {
+                else if (type === 'diag-process') { 
                     obj = new fabric.Rect({ width: 110, height: 60, fill: '#f8fafc', stroke: color, strokeWidth: strokeW, rx: 4, ry: 4 });
                 }
-                else if (type === 'diag-decision') {
+                else if (type === 'diag-decision') { 
                     obj = new fabric.Rect({ width: 75, height: 75, angle: 45, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
                 }
-                else if (type === 'diag-start') {
+                else if (type === 'diag-start') { 
                     obj = new fabric.Rect({ width: 120, height: 50, rx: 25, ry: 25, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
                 }
-                else if (type === 'diag-document') {
-                    const path = new fabric.Path('M 0 0 L 100 0 L 100 60 Q 75 80 50 60 T 0 60 Z', {
+                else if (type === 'diag-document') { 
+                    obj = new fabric.Path('M 0 0 L 100 0 L 100 60 Q 75 80 50 60 T 0 60 Z', {
                         fill: '#f8fafc', stroke: color, strokeWidth: strokeW
                     });
-                    obj = path;
                 }
-                else if (type === 'diag-data') {
-                    const polygon = new fabric.Polygon([
+                else if (type === 'diag-data') { 
+                    obj = new fabric.Polygon([
                         {x: 20, y: 0}, {x: 110, y: 0}, {x: 90, y: 60}, {x: 0, y: 60}
                     ], { fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
-                    obj = polygon;
                 }
-                else if (type === 'diag-circle') {
+                else if (type === 'diag-circle') { 
                     obj = new fabric.Circle({ radius: 30, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
                 }
-
-                // --- 4. CAIXA DE TEXTO ---
                 else if (type === 'textbox') {
                     obj = new fabric.IText('Clique para editar', {
                         fontSize: 18,
@@ -2616,13 +2632,83 @@ def anotacoes_page():
             window.limparCanvas = function() {
                 if(window.fCanvas) {
                     window.fCanvas.clear();
-                    window.fCanvas.setBackgroundColor(window.sketchpadState.bgColor, window.fCanvas.renderAll.bind(window.fCanvas));
+                    window.fCanvas.setBackgroundColor(window.sketchpadState.bgColor, function() {
+                        window.fCanvas.renderAll();
+                        window.salvarEstadoCanvas();
+                    });
                 }
             };
 
             window.obterDataURLCanvas = function() {
                 if(!window.fCanvas) return '';
                 return window.fCanvas.toDataURL({ format: 'png', quality: 1 });
+            };
+
+            // MODAL EM TELA CHEIA PARA IMAGENS
+            window.abrirImagemModal = function(src) {
+                const overlay = document.getElementById('image-modal-overlay');
+                const img = document.getElementById('image-modal-img');
+                if(overlay && img) {
+                    img.src = src;
+                    overlay.style.display = 'flex';
+                }
+            };
+
+            window.fecharModalImagem = function() {
+                const overlay = document.getElementById('image-modal-overlay');
+                if(overlay) overlay.style.display = 'none';
+            };
+
+            // =============================================
+            // GERENCIAMENTO DE TELA CHEIA E REDIMENSIONAMENTO DINÂMICO
+            // =============================================
+            window.tratarMudancaTelaCheia = function() {
+                const btnExit = document.getElementById('btn-exit-fullscreen');
+                const container = document.getElementById('sketchpad_container');
+                const isFS = !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+                if (btnExit) {
+                    btnExit.style.display = isFS ? 'flex' : 'none';
+                }
+
+                if (window.fCanvas && container) {
+                    if (isFS) {
+                        // Expande o Canvas para cobrir a tela inteira (100vw x 100vh)
+                        const w = window.innerWidth;
+                        const h = window.innerHeight;
+                        window.fCanvas.setWidth(w);
+                        window.fCanvas.setHeight(h);
+                        container.style.width = '100vw';
+                        container.style.height = '100vh';
+                    } else {
+                        // Restaura para a largura do container original
+                        container.style.width = '100%';
+                        container.style.height = 'auto';
+                        const w = container.parentElement ? container.parentElement.clientWidth : (window.canvasOriginalDimensions.width || 800);
+                        const h = window.canvasOriginalDimensions.height || 520;
+                        window.fCanvas.setWidth(w);
+                        window.fCanvas.setHeight(h);
+                    }
+                    window.fCanvas.renderAll();
+                }
+            };
+
+            document.addEventListener('fullscreenchange', window.tratarMudancaTelaCheia);
+            document.addEventListener('webkitfullscreenchange', window.tratarMudancaTelaCheia);
+            window.addEventListener('resize', function() {
+                if (document.fullscreenElement || document.webkitFullscreenElement) {
+                    window.tratarMudancaTelaCheia();
+                }
+            });
+
+            window.sairTelaCheiaManual = function() {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
             };
         </script>
     ''')
@@ -2683,6 +2769,11 @@ def anotacoes_page():
                                     ui.button(icon="near_me", on_click=lambda: ui.run_javascript("window.setCanvasMode('select');")).props("dense flat color=primary").tooltip("Selecionar / Mover / Redimensionar")
                                     ui.button(icon="edit", on_click=lambda: ui.run_javascript("window.setCanvasMode('draw');")).props("dense flat color=purple").tooltip("Pincel Livre")
 
+                                # DESFAZER / REFAZER
+                                with ui.row().classes("items-center gap-1 bg-white p-1 rounded-lg border"):
+                                    ui.button(icon="undo", on_click=lambda: ui.run_javascript("window.desfazerCanvas();")).props("dense flat color=slate").tooltip("Desfazer (Undo)")
+                                    ui.button(icon="redo", on_click=lambda: ui.run_javascript("window.refazerCanvas();")).props("dense flat color=slate").tooltip("Refazer (Redo)")
+
                                 # 1. MENU LINHAS E RETAS
                                 with ui.button("Linhas", icon="timeline").props("dense flat color=purple").classes("text-xs"):
                                     with ui.menu():
@@ -2732,54 +2823,26 @@ def anotacoes_page():
                                         ui.label("Fundo:").classes("text-xs font-bold text-slate-600")
                                         ui.color_input(value="#ffffff", on_change=lambda e: ui.run_javascript(f"window.alterarCorFundoCanvas('{e.value}');")).props("dense borderless").classes("w-7 h-7")
 
-                                # Tela Cheia com instrução clara e concisa
+                                # Alternar Tela Cheia
                                 def alternar_tela_cheia():
                                     ui.run_javascript('''
                                         const c = document.getElementById('sketchpad_container');
                                         if (!document.fullscreenElement && !document.webkitFullscreenElement) {
                                             if (c.requestFullscreen) c.requestFullscreen();
                                             else if (c.webkitRequestFullscreen) c.webkitRequestFullscreen();
-                                            
-                                            let banner = document.getElementById('fullscreen_hint');
-                                            if(!banner) {
-                                                banner = document.createElement('div');
-                                                banner.id = 'fullscreen_hint';
-                                                banner.style.cssText = `
-                                                    position: absolute;
-                                                    top: 16px;
-                                                    left: 50%;
-                                                    transform: translateX(-50%);
-                                                    background: rgba(15, 23, 42, 0.90);
-                                                    color: #ffffff;
-                                                    padding: 8px 18px;
-                                                    border-radius: 20px;
-                                                    font-size: 13px;
-                                                    font-weight: 600;
-                                                    z-index: 9999;
-                                                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                                                    pointer-events: none;
-                                                    transition: opacity 0.4s ease;
-                                                `;
-                                                banner.innerText = '💡 Deslize de cima para baixo ou pressione ESC para sair';
-                                                c.appendChild(banner);
-                                            }
-                                            banner.style.opacity = '1';
-                                            
-                                            setTimeout(() => {
-                                                if(banner) banner.style.opacity = '0';
-                                            }, 3500);
-
                                         } else {
-                                            if (document.exitFullscreen) document.exitFullscreen();
-                                            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                                            window.sairTelaCheiaManual();
                                         }
                                     ''')
 
                                 ui.button("⛶ Tela Cheia", on_click=alternar_tela_cheia).props("dense outline color=purple").classes("text-xs")
 
-                        # AREA DO CANVAS
+                        # CONTAINER DO CANVAS COM BOTÃO FLUTUANTE EM Z-INDEX ELEVADO
                         ui.html('''
                             <div id="sketchpad_container" style="position: relative; width: 100%; text-align: center; overflow: hidden; background: #fff; border-radius:12px;">
+                                <button id="btn-exit-fullscreen" onclick="window.sairTelaCheiaManual()" style="display:none; position:fixed; top:20px; right:20px; z-index:99999; background:#e11d48; color:#fff; border:none; padding:10px 18px; border-radius:20px; font-weight:bold; font-size:14px; box-shadow:0 4px 12px rgba(0,0,0,0.5); cursor:pointer; align-items:center; gap:6px;">
+                                    ✖ Sair da Tela Cheia
+                                </button>
                                 <canvas id="sketchpad" style="border:2px dashed #a855f7; border-radius:12px; max-width:100%;"></canvas>
                             </div>
                         ''').classes("w-full")
@@ -2791,7 +2854,7 @@ def anotacoes_page():
                             async def anexar_desenho():
                                 img_url = await ui.run_javascript("return window.obterDataURLCanvas ? window.obterDataURLCanvas() : '';")
                                 if img_url and len(img_url) > 100:
-                                    tag_img = f'<p><img src="{img_url}" style="max-width:100%; border-radius:8px; border:1px solid #cbd5e1; margin:12px 0;" /></p>'
+                                    tag_img = f'<p><img src="{img_url}" onclick="window.abrirImagemModal(this.src)" style="max-width:100%; border-radius:8px; border:1px solid #cbd5e1; margin:12px 0; cursor:pointer;" title="Clique para ampliar em tela cheia" /></p>'
                                     editor_conteudo.value = (editor_conteudo.value or "") + tag_img
                                     ui.notify("Diagrama/Desenho anexado à anotação!", color="positive")
                                     ui.run_javascript("if(window.limparCanvas) window.limparCanvas();")
@@ -2958,6 +3021,16 @@ def anotacoes_page():
 
                 with ui.column().classes("w-full p-5 bg-white border-t border-slate-100 overflow-x-auto text-slate-800"):
                     ui.html(item.get("conteudo", "")).classes("w-full prose max-w-none")
+
+            ui.run_javascript('''
+                setTimeout(() => {
+                    document.querySelectorAll('.prose img').forEach(img => {
+                        img.style.cursor = 'pointer';
+                        img.title = 'Clique para ver em tela cheia';
+                        img.onclick = function() { window.abrirImagemModal(this.src); };
+                    });
+                }, 300);
+            ''')
 
         filter_busca.on("update:model-value", carregar_e_renderizar_anotacoes)
 
