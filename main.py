@@ -2393,6 +2393,30 @@ def anotacoes_page():
                 lineWidth: 2
             };
 
+            // Ajusta as dimensões do Canvas para ocupar 100% no Fullscreen ou normal
+            window.ajustarTamanhoCanvas = function() {
+                if (!window.fCanvas) return;
+                
+                const container = document.getElementById('sketchpad_container');
+                if (!container) return;
+
+                if (document.fullscreenElement || document.webkitFullscreenElement) {
+                    const larguraTela = window.innerWidth;
+                    const alturaTela = window.innerHeight;
+                    window.fCanvas.setWidth(larguraTela);
+                    window.fCanvas.setHeight(alturaTela);
+                } else {
+                    const containerWidth = container.clientWidth || 800;
+                    window.fCanvas.setWidth(containerWidth);
+                    window.fCanvas.setHeight(520);
+                }
+                window.fCanvas.renderAll();
+            };
+
+            document.addEventListener('fullscreenchange', window.ajustarTamanhoCanvas);
+            document.addEventListener('webkitfullscreenchange', window.ajustarTamanhoCanvas);
+            window.addEventListener('resize', window.ajustarTamanhoCanvas);
+
             window.inicializarCanvasAnotacoes = function() {
                 const el = document.getElementById('sketchpad');
                 if(!el) return;
@@ -2401,7 +2425,9 @@ def anotacoes_page():
                     window.fCanvas.dispose();
                 }
 
-                const containerWidth = el.parentElement.clientWidth || 800;
+                const container = document.getElementById('sketchpad_container');
+                const containerWidth = container ? container.clientWidth : 800;
+
                 window.fCanvas = new fabric.Canvas('sketchpad', {
                     width: containerWidth,
                     height: 520,
@@ -2416,6 +2442,8 @@ def anotacoes_page():
                 if(upperCanvas) {
                     upperCanvas.style.touchAction = 'none';
                 }
+
+                window.ajustarTamanhoCanvas();
             };
 
             window.setCanvasMode = function(mode) {
@@ -2477,7 +2505,7 @@ def anotacoes_page():
                 else if (type === 'line-dashed') {
                     obj = new fabric.Line([0, 0, 120, 0], { stroke: color, strokeWidth: strokeW, strokeDashArray: [6, 6] });
                 } 
-                else if (type === 'line-elbow') { // Linha angulada estilo diagrama
+                else if (type === 'line-elbow') {
                     const p1 = new fabric.Polyline([
                         {x: 0, y: 0},
                         {x: 60, y: 0},
@@ -2514,7 +2542,7 @@ def anotacoes_page():
                     const t2 = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: -7, angle: 90 });
                     obj = new fabric.Group([l, t1, t2]);
                 }
-                else if (type === 'arrow-elbow') { // Seta conectora angular
+                else if (type === 'arrow-elbow') {
                     const p = new fabric.Polyline([
                         {x: 0, y: 0},
                         {x: 50, y: 0},
@@ -2524,7 +2552,7 @@ def anotacoes_page():
                     const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: 43, angle: 90 });
                     obj = new fabric.Group([p, t]);
                 }
-                else if (type === 'arrow-block') { // Seta larga estilo bloco Excel
+                else if (type === 'arrow-block') {
                     const path = new fabric.Path('M 0 20 L 60 20 L 60 0 L 100 30 L 60 60 L 60 40 L 0 40 Z', {
                         fill: 'transparent', stroke: color, strokeWidth: strokeW
                     });
@@ -2532,28 +2560,28 @@ def anotacoes_page():
                 }
 
                 // --- 3. DIAGRAMAS E FLUXOGRAMAS ---
-                else if (type === 'diag-process') { // Retângulo
+                else if (type === 'diag-process') {
                     obj = new fabric.Rect({ width: 110, height: 60, fill: '#f8fafc', stroke: color, strokeWidth: strokeW, rx: 4, ry: 4 });
                 }
-                else if (type === 'diag-decision') { // Losango
+                else if (type === 'diag-decision') {
                     obj = new fabric.Rect({ width: 75, height: 75, angle: 45, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
                 }
-                else if (type === 'diag-start') { // Pílula / Início
+                else if (type === 'diag-start') {
                     obj = new fabric.Rect({ width: 120, height: 50, rx: 25, ry: 25, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
                 }
-                else if (type === 'diag-document') { // Documento (Onda embaixo)
+                else if (type === 'diag-document') {
                     const path = new fabric.Path('M 0 0 L 100 0 L 100 60 Q 75 80 50 60 T 0 60 Z', {
                         fill: '#f8fafc', stroke: color, strokeWidth: strokeW
                     });
                     obj = path;
                 }
-                else if (type === 'diag-data') { // Paralelogramo (Dados)
+                else if (type === 'diag-data') {
                     const polygon = new fabric.Polygon([
                         {x: 20, y: 0}, {x: 110, y: 0}, {x: 90, y: 60}, {x: 0, y: 60}
                     ], { fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
                     obj = polygon;
                 }
-                else if (type === 'diag-circle') { // Conector
+                else if (type === 'diag-circle') {
                     obj = new fabric.Circle({ radius: 30, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
                 }
 
@@ -2567,7 +2595,6 @@ def anotacoes_page():
                     });
                 }
 
-                // Posicionamento no centro
                 if(obj) {
                     obj.set({ left: center.left - 40, top: center.top - 30 });
                     window.fCanvas.add(obj);
@@ -2656,7 +2683,7 @@ def anotacoes_page():
                                     ui.button(icon="near_me", on_click=lambda: ui.run_javascript("window.setCanvasMode('select');")).props("dense flat color=primary").tooltip("Selecionar / Mover / Redimensionar")
                                     ui.button(icon="edit", on_click=lambda: ui.run_javascript("window.setCanvasMode('draw');")).props("dense flat color=purple").tooltip("Pincel Livre")
 
-                                # 1. MENU LINHAS E RECTAS
+                                # 1. MENU LINHAS E RETAS
                                 with ui.button("Linhas", icon="timeline").props("dense flat color=purple").classes("text-xs"):
                                     with ui.menu():
                                         ui.menu_item("Reta Horizontal / Livre", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('line-straight');"))
@@ -2705,15 +2732,46 @@ def anotacoes_page():
                                         ui.label("Fundo:").classes("text-xs font-bold text-slate-600")
                                         ui.color_input(value="#ffffff", on_change=lambda e: ui.run_javascript(f"window.alterarCorFundoCanvas('{e.value}');")).props("dense borderless").classes("w-7 h-7")
 
-                                # Tela Cheia
+                                # Tela Cheia com instrução clara e concisa
                                 def alternar_tela_cheia():
                                     ui.run_javascript('''
                                         const c = document.getElementById('sketchpad_container');
-                                        if (!document.fullscreenElement) {
+                                        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
                                             if (c.requestFullscreen) c.requestFullscreen();
                                             else if (c.webkitRequestFullscreen) c.webkitRequestFullscreen();
+                                            
+                                            let banner = document.getElementById('fullscreen_hint');
+                                            if(!banner) {
+                                                banner = document.createElement('div');
+                                                banner.id = 'fullscreen_hint';
+                                                banner.style.cssText = `
+                                                    position: absolute;
+                                                    top: 16px;
+                                                    left: 50%;
+                                                    transform: translateX(-50%);
+                                                    background: rgba(15, 23, 42, 0.90);
+                                                    color: #ffffff;
+                                                    padding: 8px 18px;
+                                                    border-radius: 20px;
+                                                    font-size: 13px;
+                                                    font-weight: 600;
+                                                    z-index: 9999;
+                                                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                                                    pointer-events: none;
+                                                    transition: opacity 0.4s ease;
+                                                `;
+                                                banner.innerText = '💡 Deslize de cima para baixo ou pressione ESC para sair';
+                                                c.appendChild(banner);
+                                            }
+                                            banner.style.opacity = '1';
+                                            
+                                            setTimeout(() => {
+                                                if(banner) banner.style.opacity = '0';
+                                            }, 3500);
+
                                         } else {
                                             if (document.exitFullscreen) document.exitFullscreen();
+                                            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
                                         }
                                     ''')
 
@@ -2721,7 +2779,7 @@ def anotacoes_page():
 
                         # AREA DO CANVAS
                         ui.html('''
-                            <div id="sketchpad_container" style="width: 100%; text-align: center; overflow: hidden; background: #fff; border-radius:12px;">
+                            <div id="sketchpad_container" style="position: relative; width: 100%; text-align: center; overflow: hidden; background: #fff; border-radius:12px;">
                                 <canvas id="sketchpad" style="border:2px dashed #a855f7; border-radius:12px; max-width:100%;"></canvas>
                             </div>
                         ''').classes("w-full")
