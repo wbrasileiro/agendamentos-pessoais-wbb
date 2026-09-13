@@ -152,8 +152,8 @@ def menu_drawer():
                 with ui.element("div").classes("p-2 bg-blue-100 rounded-xl text-blue-700 flex items-center justify-center"):
                     ui.icon("space_dashboard", size="24px")
                 with ui.column().classes("gap-0"):
-                    ui.label("Sistema de Gestão").classes("text-base font-black text-slate-900 leading-tight")
-                    ui.label("Painel Pessoal").classes("text-xs font-semibold text-slate-500")
+                    ui.label("Menu").classes("text-base font-black text-slate-900 leading-tight")
+                    #ui.label("Painel Pessoal").classes("text-xs font-semibold text-slate-500")
 
             with ui.row().classes("items-center gap-2 mt-1 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 w-full"):
                 ui.icon("account_circle", size="18px").classes("text-slate-500")
@@ -237,6 +237,11 @@ def menu_drawer():
                     ui.icon("logout", size="20px").classes("text-red-600")
                     ui.label("Sair da conta").classes("font-black text-sm")
 
+            # Texto discreto de autoria
+            ui.label('Desenvolvido por: Wellington Batista Brasileiro').classes(
+                'text-[11px] text-slate-400 font-normal px-2 leading-tight tracking-tight text-center w-full'
+            )                    
+
     return drawer
 
 
@@ -247,7 +252,7 @@ def cabecalho_app(drawer):
     ):
         with ui.row().classes("items-center gap-2"):
             ui.button(icon="menu", on_click=drawer.toggle).props("flat round color=white")
-            ui.label("Gestão Integrada").classes("text-lg font-black tracking-tight")
+            ui.label("Menu de opções").classes("text-lg font-black tracking-tight")
         
         with ui.row().classes("items-center gap-2 bg-slate-800/80 px-3 py-1 rounded-xl border border-slate-700"):
             ui.icon("person", size="18px").classes("text-slate-300")
@@ -1341,6 +1346,21 @@ def admin_page():
                             "Rejeitar", icon="cancel", on_click=rejeitar
                         ).props("color=negative").classes("font-semibold")
 
+# 1.5 BOTÃO GOOGLE CLOUD - E-MAILS LIBERADOS
+        with ui.card().classes("w-full p-4 border border-amber-200 bg-white items-left"):
+            ui.label("Cadastrar Novo E-mail no Google Cloud").classes(
+                "text-lg font-bold mb-2"
+            )            
+            ui.button(
+                "Ir para Google Cloud",
+                icon="open_in_new",
+                on_click=lambda: ui.navigate.to(
+                    "https://console.cloud.google.com/auth/audience?project=app-agendamentos-pessoais",
+                    new_tab=True
+                )
+            ).props("color=primary").classes("font-semibold text-white")      
+                              
+
         # 2. GERENCIAMENTO DE USUÁRIOS (ATIVAR, INATIVAR E EXCLUIR)
         with ui.card().classes("w-full p-4 border border-amber-200 bg-white"):
             ui.label("👥 Usuários Cadastrados").classes(
@@ -2332,15 +2352,12 @@ def formatar_data_brasilia(data_iso_str: str) -> str:
     if not data_iso_str:
         return ""
     try:
-        # Normaliza sufixo Z para offset ISO
         data_clean = data_iso_str.replace("Z", "+00:00")
         dt = datetime.fromisoformat(data_clean)
         
-        # Caso a string venha sem fuso definido (naive), assume UTC
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=ZoneInfo("UTC"))
             
-        # Converte para o fuso de Brasília
         dt_br = dt.astimezone(ZoneInfo("America/Sao_Paulo"))
         return f"Criado em: {dt_br.strftime('%d/%m/%Y às %H:%M')}"
     except Exception:
@@ -2360,52 +2377,225 @@ def anotacoes_page():
     user_id = app.storage.user.get("user_id")
 
     anotacao_em_edicao = {'id': None}
-    topo_ancora = ui.element('div').classes('w-full')
 
+    # Carrega Fabric.js para vetores/diagramas dinâmicos
+    ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>')
+
+    # ====================================================
+    # ENGINE JS DO CANVAS ESTILO EXCEL / OFFICE
+    # ====================================================
     ui.add_body_html('''
         <script>
+            window.fCanvas = null;
+            window.sketchpadState = {
+                color: '#2563eb',
+                bgColor: '#ffffff',
+                lineWidth: 2
+            };
+
             window.inicializarCanvasAnotacoes = function() {
-                const canvas = document.getElementById('sketchpad');
-                if(!canvas) return;
-                const ctx = canvas.getContext('2d');
-                let drawing = false;
+                const el = document.getElementById('sketchpad');
+                if(!el) return;
 
-                ctx.lineWidth = 3;
-                ctx.lineCap = 'round';
-                ctx.strokeStyle = '#000000';
-
-                function getPos(e) {
-                    const rect = canvas.getBoundingClientRect();
-                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-                    return { x: clientX - rect.left, y: clientY - rect.top };
+                if(window.fCanvas) {
+                    window.fCanvas.dispose();
                 }
 
-                function startDraw(e) { drawing = true; draw(e); }
-                function endDraw() { drawing = false; ctx.beginPath(); }
-                function draw(e) {
-                    if(!drawing) return;
-                    e.preventDefault();
-                    const pos = getPos(e);
-                    ctx.lineTo(pos.x, pos.y);
-                    ctx.stroke();
-                    ctx.beginPath();
-                    ctx.moveTo(pos.x, pos.y);
+                const containerWidth = el.parentElement.clientWidth || 800;
+                window.fCanvas = new fabric.Canvas('sketchpad', {
+                    width: containerWidth,
+                    height: 520,
+                    backgroundColor: window.sketchpadState.bgColor,
+                    isDrawingMode: false
+                });
+
+                window.fCanvas.freeDrawingBrush.color = window.sketchpadState.color;
+                window.fCanvas.freeDrawingBrush.width = parseInt(window.sketchpadState.lineWidth, 10);
+
+                const upperCanvas = window.fCanvas.upperCanvasEl;
+                if(upperCanvas) {
+                    upperCanvas.style.touchAction = 'none';
+                }
+            };
+
+            window.setCanvasMode = function(mode) {
+                if(!window.fCanvas) return;
+                window.fCanvas.isDrawingMode = (mode === 'draw');
+            };
+
+            window.setBrushColor = function(color) {
+                window.sketchpadState.color = color;
+                if(window.fCanvas) {
+                    window.fCanvas.freeDrawingBrush.color = color;
+                    const activeObj = window.fCanvas.getActiveObject();
+                    if(activeObj) {
+                        if(activeObj.type === 'i-text' || activeObj.type === 'text') {
+                            activeObj.set('fill', color);
+                        } else {
+                            if(activeObj.stroke) activeObj.set('stroke', color);
+                            if(activeObj.fill && activeObj.fill !== 'transparent') activeObj.set('fill', color);
+                        }
+                        window.fCanvas.renderAll();
+                    }
+                }
+            };
+
+            window.setLineWidth = function(width) {
+                window.sketchpadState.lineWidth = width;
+                if(window.fCanvas) {
+                    window.fCanvas.freeDrawingBrush.width = parseInt(width, 10);
+                }
+            };
+
+            window.alterarCorFundoCanvas = function(color) {
+                window.sketchpadState.bgColor = color;
+                if(window.fCanvas) {
+                    window.fCanvas.setBackgroundColor(color, window.fCanvas.renderAll.bind(window.fCanvas));
+                }
+            };
+
+            // =============================================
+            // GERADOR DE FORMAS / SETAS / LINHAS / TEXTO
+            // =============================================
+            window.adicionarFormaAvancada = function(type) {
+                if(!window.fCanvas) return;
+                window.setCanvasMode('select');
+
+                const color = window.sketchpadState.color;
+                const strokeW = parseInt(window.sketchpadState.lineWidth, 10);
+                const center = window.fCanvas.getCenter();
+
+                let obj = null;
+
+                // --- 1. LINHAS E CONECTORES ---
+                if (type === 'line-straight') {
+                    obj = new fabric.Line([0, 0, 120, 0], { stroke: color, strokeWidth: strokeW });
+                } 
+                else if (type === 'line-diagonal') {
+                    obj = new fabric.Line([0, 0, 100, 80], { stroke: color, strokeWidth: strokeW });
+                } 
+                else if (type === 'line-dashed') {
+                    obj = new fabric.Line([0, 0, 120, 0], { stroke: color, strokeWidth: strokeW, strokeDashArray: [6, 6] });
+                } 
+                else if (type === 'line-elbow') { // Linha angulada estilo diagrama
+                    const p1 = new fabric.Polyline([
+                        {x: 0, y: 0},
+                        {x: 60, y: 0},
+                        {x: 60, y: 60},
+                        {x: 120, y: 60}
+                    ], { fill: 'transparent', stroke: color, strokeWidth: strokeW });
+                    obj = p1;
                 }
 
-                canvas.addEventListener('mousedown', startDraw);
-                canvas.addEventListener('mouseup', endDraw);
-                canvas.addEventListener('mousemove', draw);
-                canvas.addEventListener('touchstart', startDraw);
-                canvas.addEventListener('touchend', endDraw);
-                canvas.addEventListener('touchmove', draw);
+                // --- 2. SETAS (MÚLTIPLAS DIREÇÕES E CURVAS) ---
+                else if (type === 'arrow-right') {
+                    const l = new fabric.Line([0, 0, 100, 0], { stroke: color, strokeWidth: strokeW });
+                    const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: -7, angle: 90 });
+                    obj = new fabric.Group([l, t]);
+                }
+                else if (type === 'arrow-left') {
+                    const l = new fabric.Line([14, 0, 114, 0], { stroke: color, strokeWidth: strokeW });
+                    const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 0, top: 7, angle: -90 });
+                    obj = new fabric.Group([l, t]);
+                }
+                else if (type === 'arrow-up') {
+                    const l = new fabric.Line([0, 14, 0, 114], { stroke: color, strokeWidth: strokeW });
+                    const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: -7, top: 0, angle: 0 });
+                    obj = new fabric.Group([l, t]);
+                }
+                else if (type === 'arrow-down') {
+                    const l = new fabric.Line([0, 0, 0, 100], { stroke: color, strokeWidth: strokeW });
+                    const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 7, top: 100, angle: 180 });
+                    obj = new fabric.Group([l, t]);
+                }
+                else if (type === 'arrow-double-h') {
+                    const l = new fabric.Line([10, 0, 100, 0], { stroke: color, strokeWidth: strokeW });
+                    const t1 = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 0, top: 7, angle: -90 });
+                    const t2 = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: -7, angle: 90 });
+                    obj = new fabric.Group([l, t1, t2]);
+                }
+                else if (type === 'arrow-elbow') { // Seta conectora angular
+                    const p = new fabric.Polyline([
+                        {x: 0, y: 0},
+                        {x: 50, y: 0},
+                        {x: 50, y: 50},
+                        {x: 100, y: 50}
+                    ], { fill: 'transparent', stroke: color, strokeWidth: strokeW });
+                    const t = new fabric.Triangle({ width: 14, height: 14, fill: color, left: 100, top: 43, angle: 90 });
+                    obj = new fabric.Group([p, t]);
+                }
+                else if (type === 'arrow-block') { // Seta larga estilo bloco Excel
+                    const path = new fabric.Path('M 0 20 L 60 20 L 60 0 L 100 30 L 60 60 L 60 40 L 0 40 Z', {
+                        fill: 'transparent', stroke: color, strokeWidth: strokeW
+                    });
+                    obj = path;
+                }
 
-                window.limparCanvas = function() {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                };
-                window.obterDataURLCanvas = function() {
-                    return canvas.toDataURL("image/png");
-                };
+                // --- 3. DIAGRAMAS E FLUXOGRAMAS ---
+                else if (type === 'diag-process') { // Retângulo
+                    obj = new fabric.Rect({ width: 110, height: 60, fill: '#f8fafc', stroke: color, strokeWidth: strokeW, rx: 4, ry: 4 });
+                }
+                else if (type === 'diag-decision') { // Losango
+                    obj = new fabric.Rect({ width: 75, height: 75, angle: 45, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
+                }
+                else if (type === 'diag-start') { // Pílula / Início
+                    obj = new fabric.Rect({ width: 120, height: 50, rx: 25, ry: 25, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
+                }
+                else if (type === 'diag-document') { // Documento (Onda embaixo)
+                    const path = new fabric.Path('M 0 0 L 100 0 L 100 60 Q 75 80 50 60 T 0 60 Z', {
+                        fill: '#f8fafc', stroke: color, strokeWidth: strokeW
+                    });
+                    obj = path;
+                }
+                else if (type === 'diag-data') { // Paralelogramo (Dados)
+                    const polygon = new fabric.Polygon([
+                        {x: 20, y: 0}, {x: 110, y: 0}, {x: 90, y: 60}, {x: 0, y: 60}
+                    ], { fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
+                    obj = polygon;
+                }
+                else if (type === 'diag-circle') { // Conector
+                    obj = new fabric.Circle({ radius: 30, fill: '#f8fafc', stroke: color, strokeWidth: strokeW });
+                }
+
+                // --- 4. CAIXA DE TEXTO ---
+                else if (type === 'textbox') {
+                    obj = new fabric.IText('Clique para editar', {
+                        fontSize: 18,
+                        fill: color,
+                        fontFamily: 'Arial',
+                        backgroundColor: '#ffffff'
+                    });
+                }
+
+                // Posicionamento no centro
+                if(obj) {
+                    obj.set({ left: center.left - 40, top: center.top - 30 });
+                    window.fCanvas.add(obj);
+                    window.fCanvas.setActiveObject(obj);
+                    window.fCanvas.renderAll();
+                }
+            };
+
+            window.deletarSelecionado = function() {
+                if(!window.fCanvas) return;
+                const activeObjects = window.fCanvas.getActiveObjects();
+                if(activeObjects.length) {
+                    activeObjects.forEach(obj => window.fCanvas.remove(obj));
+                    window.fCanvas.discardActiveObject();
+                    window.fCanvas.renderAll();
+                }
+            };
+
+            window.limparCanvas = function() {
+                if(window.fCanvas) {
+                    window.fCanvas.clear();
+                    window.fCanvas.setBackgroundColor(window.sketchpadState.bgColor, window.fCanvas.renderAll.bind(window.fCanvas));
+                }
+            };
+
+            window.obterDataURLCanvas = function() {
+                if(!window.fCanvas) return '';
+                return window.fCanvas.toDataURL({ format: 'png', quality: 1 });
             };
         </script>
     ''')
@@ -2413,7 +2603,7 @@ def anotacoes_page():
     with ui.column().classes("w-full max-w-6xl mx-auto p-3 sm:p-6 gap-8 font-sans pb-32"):
 
         # ====================================================
-        # SEÇÃO 1: FORMULÁRIO DE ANOTAÇÃO (FOLHA EM BRANCO)
+        # SEÇÃO 1: FORMULÁRIO DE ANOTAÇÃO
         # ====================================================
         with ui.card().classes("w-full p-4 sm:p-6 border-2 border-purple-200 bg-purple-50/10 shadow-lg rounded-2xl gap-5"):
             with ui.row().classes("w-full items-center justify-between border-b border-purple-100 pb-3"):
@@ -2422,60 +2612,135 @@ def anotacoes_page():
                     titulo_formulario = ui.label("Nova Anotação").classes("text-2xl sm:text-3xl font-bold text-slate-800")
 
             with ui.column().classes("w-full gap-4"):
-                # Campo Título
                 input_titulo = ui.input(
                     "Título da Anotação", 
-                    placeholder="Ex: Ideias para o projeto, Minuta de reunião..."
+                    placeholder="Ex: Fluxograma do projeto, Minuta de reunião..."
                 ).props("outlined bg-white input-class=text-lg font-bold").classes("w-full")
 
-                # Área Principal de Anotações (Editor Amplo Visível)
                 ui.label("Conteúdo / Folha de Anotação").classes("text-base font-bold text-slate-700")
 
                 toolbar_options = "[['bold', 'italic', 'underline', 'strike'], ['quote', 'unordered', 'ordered'], ['left', 'center', 'right', 'justify'], ['token', 'hr', 'link'], ['undo', 'redo', 'fullscreen']]"
 
                 editor_conteudo = ui.editor(
                     placeholder="Escreva livremente aqui sua anotação..."
-                ).classes("w-full bg-white border-2 border-purple-200 rounded-xl min-h-[420px] text-lg shadow-inner").props(f':toolbar="{toolbar_options}"')
+                ).classes("w-full bg-white border-2 border-purple-200 rounded-xl min-h-[380px] text-lg shadow-inner").props(f':toolbar="{toolbar_options}"')
 
-                # Barra de opções rápidas para cores e marca-texto no editor
+                # Barra de cores rápidas para texto
                 with ui.row().classes("gap-2 items-center text-xs font-bold text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-200"):
-                    ui.label("Cores e Marca-Texto:").classes("mr-1")
-                    ui.button("Texto Vermelho", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#e11d48')")).props("dense outline color=red")
-                    ui.button("Texto Azul", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#2563eb')")).props("dense outline color=blue")
-                    ui.button("Texto Verde", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#16a34a')")).props("dense outline color=green")
-                    ui.button("🟡 Marca-Texto Amarelo", on_click=lambda: ui.run_javascript("document.execCommand('hiliteColor', false, '#fef08a')")).props("dense color=warning")
-                    ui.button("🟢 Marca-Texto Verde", on_click=lambda: ui.run_javascript("document.execCommand('hiliteColor', false, '#bbf7d0')")).props("dense color=positive")
-                    ui.button("🧹 Limpar Formatação", on_click=lambda: ui.run_javascript("document.execCommand('removeFormat', false, null)")).props("dense flat color=grey")
+                    ui.label("Cores do Texto:").classes("mr-1")
+                    ui.button("Vermelho", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#e11d48')")).props("dense outline color=red")
+                    ui.button("Azul", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#2563eb')")).props("dense outline color=blue")
+                    ui.button("Verde", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#16a34a')")).props("dense outline color=green")
+                    ui.button("🟡 Amarelo", on_click=lambda: ui.run_javascript("document.execCommand('hiliteColor', false, '#fef08a')")).props("dense color=warning")
+                    ui.button("🟢 Marca-Texto", on_click=lambda: ui.run_javascript("document.execCommand('hiliteColor', false, '#bbf7d0')")).props("dense color=positive")
+                    ui.button("🧹 Limpar", on_click=lambda: ui.run_javascript("document.execCommand('removeFormat', false, null)")).props("dense flat color=grey")
 
-                # Área de Desenho a Mão Livre (Canvas)
-                exp_desenho = ui.expansion("🎨 Adicionar Desenho / Rascunho a Mão Livre", icon="gesture").classes(
+                # ====================================================
+                # CANVAS COM DROPDOWNS ESTILO EXCEL / OFFICE
+                # ====================================================
+                exp_desenho = ui.expansion("🎨 Criar Figuras ou Desenhos", icon="schema").classes(
                     "w-full bg-white border border-purple-200 rounded-xl text-purple-900 font-bold"
                 )
                 
                 with exp_desenho:
                     with ui.column().classes("w-full items-center gap-3 p-3"):
-                        ui.label("Utilize o mouse ou touch para desenhar no quadro abaixo:").classes("text-xs text-slate-500 font-normal")
                         
+                        # BARRA DE FERRAMENTAS ESTILO EXCEL
+                        with ui.column().classes("w-full bg-slate-100 p-3 rounded-xl border gap-2"):
+                            
+                            # LINHA DE CONTROLES E DROPDOWNS DE FORMAS
+                            with ui.row().classes("w-full items-center justify-between gap-2 flex-wrap"):
+                                
+                                # Modo de Interação
+                                with ui.row().classes("items-center gap-1 bg-white p-1 rounded-lg border"):
+                                    ui.button(icon="near_me", on_click=lambda: ui.run_javascript("window.setCanvasMode('select');")).props("dense flat color=primary").tooltip("Selecionar / Mover / Redimensionar")
+                                    ui.button(icon="edit", on_click=lambda: ui.run_javascript("window.setCanvasMode('draw');")).props("dense flat color=purple").tooltip("Pincel Livre")
+
+                                # 1. MENU LINHAS E RECTAS
+                                with ui.button("Linhas", icon="timeline").props("dense flat color=purple").classes("text-xs"):
+                                    with ui.menu():
+                                        ui.menu_item("Reta Horizontal / Livre", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('line-straight');"))
+                                        ui.menu_item("Linha Diagonal", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('line-diagonal');"))
+                                        ui.menu_item("Linha Tracejada", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('line-dashed');"))
+                                        ui.menu_item("Linha Angulada (Vários Lados)", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('line-elbow');"))
+
+                                # 2. MENU SETAS (MÚLTIPLAS DIREÇÕES)
+                                with ui.button("Setas", icon="east").props("dense flat color=purple").classes("text-xs"):
+                                    with ui.menu():
+                                        ui.menu_item("➡️ Seta Direita", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('arrow-right');"))
+                                        ui.menu_item("⬅️ Seta Esquerda", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('arrow-left');"))
+                                        ui.menu_item("⬆️ Seta Para Cima", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('arrow-up');"))
+                                        ui.menu_item("⬇️ Seta Para Baixo", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('arrow-down');"))
+                                        ui.menu_item("↔️ Seta Dupla Horizontal", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('arrow-double-h');"))
+                                        ui.menu_item("↪️ Seta Angulada / Curva", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('arrow-elbow');"))
+                                        ui.menu_item("➔ Seta Larga / Bloco", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('arrow-block');"))
+
+                                # 3. MENU FLUXOGRAMA & DIAGRAMAS
+                                with ui.button("Diagramas", icon="account_tree").props("dense flat color=purple").classes("text-xs"):
+                                    with ui.menu():
+                                        ui.menu_item("⬜ Processo (Retângulo)", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('diag-process');"))
+                                        ui.menu_item("🔷 Decisão (Losango)", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('diag-decision');"))
+                                        ui.menu_item("💊 Início / Fim (Pílula)", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('diag-start');"))
+                                        ui.menu_item("📄 Documento", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('diag-document');"))
+                                        ui.menu_item("▱ Entrada de Dados (Paralelogramo)", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('diag-data');"))
+                                        ui.menu_item("⚪ Conector (Círculo)", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('diag-circle');"))
+
+                                # 4. CAIXA DE TEXTO
+                                ui.button("Texto", icon="title", on_click=lambda: ui.run_javascript("window.adicionarFormaAvancada('textbox');")).props("dense flat color=purple").classes("text-xs").tooltip("Inserir Caixa de Texto")
+
+                                # Excluir Selecionado
+                                ui.button(icon="delete_outline", on_click=lambda: ui.run_javascript("window.deletarSelecionado();")).props("dense flat color=negative").tooltip("Excluir Objeto Selecionado")
+
+                                # Ajuste Espessura e Cor
+                                with ui.row().classes("items-center gap-1 border-l pl-2"):
+                                    ui.label("Traço:").classes("text-xs font-bold text-slate-600")
+                                    ui.slider(min=1, max=15, value=2, on_change=lambda e: ui.run_javascript(f"window.setLineWidth({e.value});")).classes("w-16")
+
+                                with ui.row().classes("items-center gap-2 border-l pl-2"):
+                                    with ui.row().classes("items-center gap-1"):
+                                        ui.label("Cor:").classes("text-xs font-bold text-slate-600")
+                                        ui.color_input(value="#2563eb", on_change=lambda e: ui.run_javascript(f"window.setBrushColor('{e.value}');")).props("dense borderless").classes("w-7 h-7")
+                                    
+                                    with ui.row().classes("items-center gap-1"):
+                                        ui.label("Fundo:").classes("text-xs font-bold text-slate-600")
+                                        ui.color_input(value="#ffffff", on_change=lambda e: ui.run_javascript(f"window.alterarCorFundoCanvas('{e.value}');")).props("dense borderless").classes("w-7 h-7")
+
+                                # Tela Cheia
+                                def alternar_tela_cheia():
+                                    ui.run_javascript('''
+                                        const c = document.getElementById('sketchpad_container');
+                                        if (!document.fullscreenElement) {
+                                            if (c.requestFullscreen) c.requestFullscreen();
+                                            else if (c.webkitRequestFullscreen) c.webkitRequestFullscreen();
+                                        } else {
+                                            if (document.exitFullscreen) document.exitFullscreen();
+                                        }
+                                    ''')
+
+                                ui.button("⛶ Tela Cheia", on_click=alternar_tela_cheia).props("dense outline color=purple").classes("text-xs")
+
+                        # AREA DO CANVAS
                         ui.html('''
-                            <div style="text-align: center;">
-                                <canvas id="sketchpad" width="750" height="280" style="border:2px dashed #a855f7; border-radius:12px; background-color:#ffffff; cursor:crosshair; touch-action:none; max-width:100%;"></canvas>
+                            <div id="sketchpad_container" style="width: 100%; text-align: center; overflow: hidden; background: #fff; border-radius:12px;">
+                                <canvas id="sketchpad" style="border:2px dashed #a855f7; border-radius:12px; max-width:100%;"></canvas>
                             </div>
                         ''').classes("w-full")
 
-                        with ui.row().classes("gap-2"):
-                            ui.button("🧹 Limpar Desenho", on_click=lambda: ui.run_javascript("if(window.limparCanvas) window.limparCanvas();")).props("flat color=warning dense")
+                        # AÇÕES DO CANVAS
+                        with ui.row().classes("w-full justify-between gap-2 mt-1"):
+                            ui.button("🧹 Limpar Quadro", on_click=lambda: ui.run_javascript("if(window.limparCanvas) window.limparCanvas();")).props("flat color=warning dense")
                             
                             async def anexar_desenho():
                                 img_url = await ui.run_javascript("return window.obterDataURLCanvas ? window.obterDataURLCanvas() : '';")
                                 if img_url and len(img_url) > 100:
                                     tag_img = f'<p><img src="{img_url}" style="max-width:100%; border-radius:8px; border:1px solid #cbd5e1; margin:12px 0;" /></p>'
                                     editor_conteudo.value = (editor_conteudo.value or "") + tag_img
-                                    ui.notify("Desenho anexado à anotação!", color="positive")
+                                    ui.notify("Diagrama/Desenho anexado à anotação!", color="positive")
                                     ui.run_javascript("if(window.limparCanvas) window.limparCanvas();")
                                 else:
-                                    ui.notify("Desenhe algo no quadro antes de anexar!", color="warning")
+                                    ui.notify("Crie um desenho ou insira objetos antes de anexar!", color="warning")
 
-                            ui.button("📌 Anexar Desenho à Anotação", on_click=anexar_desenho).classes("bg-purple-600 text-white font-bold rounded-lg text-xs")
+                            ui.button("📌 Anexar Desenho à Anotação", on_click=anexar_desenho).classes("bg-purple-600 text-white font-bold rounded-lg text-xs px-4 py-2")
 
                 exp_desenho.on_value_change(lambda e: ui.run_javascript("setTimeout(() => { if(window.inicializarCanvasAnotacoes) window.inicializarCanvasAnotacoes(); }, 200);") if e.value else None)
 
@@ -2503,7 +2768,6 @@ def anotacoes_page():
                 current_user_id = app.storage.user.get("user_id")
 
                 try:
-                    # Obtém a data e hora atual no fuso de Brasília (ISO format)
                     agora_brasilia = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
 
                     payload = {
@@ -2517,7 +2781,6 @@ def anotacoes_page():
                         supabase.table("anotacoes").update(payload).eq("id", anotacao_em_edicao['id']).execute()
                         ui.notify("✅ Anotação atualizada!", color="positive", size="lg")
                     else:
-                        # Inclui created_at explicitamente ao criar novo registro
                         payload["created_at"] = agora_brasilia
                         supabase.table("anotacoes").insert(payload).execute()
                         ui.notify("✅ Anotação salva com sucesso!", color="positive", size="lg")
@@ -2620,7 +2883,6 @@ def anotacoes_page():
                         with ui.column().classes("gap-0.5 flex-1"):
                             ui.label(item["titulo"]).classes("text-lg sm:text-xl text-slate-800 font-bold")
                             
-                            # Formatação precisa com conversão de timezone para Brasília
                             data_fmt = formatar_data_brasilia(item.get("created_at", ""))
 
                             ui.label(data_fmt).classes("text-xs font-medium text-slate-400")
