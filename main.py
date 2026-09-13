@@ -203,14 +203,12 @@ def menu_drawer():
                             ui.label("Tarefas").classes("font-bold text-sm")
 
                 # Anotações
-                with ui.button(on_click=lambda: navegar("/anotacoes")).props("flat no-caps align=left").classes(
-                    "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
-                ):
-                    with ui.row().classes("items-center justify-between w-full"):
-                        with ui.row().classes("items-center gap-3"):
+                    with ui.button(on_click=lambda: navegar("/anotacoes")).props("flat no-caps align=left").classes(
+                        "w-full hover:bg-purple-50 text-slate-700 hover:text-purple-700 rounded-xl py-2 px-3 transition-all"
+                    ):
+                        with ui.row().classes("items-center gap-3 w-full"):
                             ui.icon("sticky_note_2", size="20px").classes("text-purple-600")
                             ui.label("Anotações").classes("font-bold text-sm")
-                        ui.label("Em breve").classes("text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full")
 
             # --- SEÇÃO 3: ADMINISTRAÇÃO ---
             if app.storage.user.get("is_admin", False) or user_email == ADMIN_EMAIL:
@@ -2324,6 +2322,328 @@ def tarefas_page():
         carregar_e_renderizar_tarefas()
 
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import asyncio
+from nicegui import ui, app
+
+# Helper para converter e formatar a data recebida no fuso de Brasília
+def formatar_data_brasilia(data_iso_str: str) -> str:
+    if not data_iso_str:
+        return ""
+    try:
+        # Normaliza sufixo Z para offset ISO
+        data_clean = data_iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(data_clean)
+        
+        # Caso a string venha sem fuso definido (naive), assume UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            
+        # Converte para o fuso de Brasília
+        dt_br = dt.astimezone(ZoneInfo("America/Sao_Paulo"))
+        return f"Criado em: {dt_br.strftime('%d/%m/%Y às %H:%M')}"
+    except Exception:
+        return ""
+
+# ==========================================
+# TELA DE UTILITÁRIOS - BLOCO DE ANOTAÇÕES
+# ==========================================
+@ui.page("/anotacoes")
+def anotacoes_page():
+    if not app.storage.user.get("user_id"):
+        ui.navigate.to("/login")
+        return
+
+    drawer = menu_drawer()
+    cabecalho_app(drawer)
+    user_id = app.storage.user.get("user_id")
+
+    anotacao_em_edicao = {'id': None}
+    topo_ancora = ui.element('div').classes('w-full')
+
+    ui.add_body_html('''
+        <script>
+            window.inicializarCanvasAnotacoes = function() {
+                const canvas = document.getElementById('sketchpad');
+                if(!canvas) return;
+                const ctx = canvas.getContext('2d');
+                let drawing = false;
+
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = '#000000';
+
+                function getPos(e) {
+                    const rect = canvas.getBoundingClientRect();
+                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    return { x: clientX - rect.left, y: clientY - rect.top };
+                }
+
+                function startDraw(e) { drawing = true; draw(e); }
+                function endDraw() { drawing = false; ctx.beginPath(); }
+                function draw(e) {
+                    if(!drawing) return;
+                    e.preventDefault();
+                    const pos = getPos(e);
+                    ctx.lineTo(pos.x, pos.y);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(pos.x, pos.y);
+                }
+
+                canvas.addEventListener('mousedown', startDraw);
+                canvas.addEventListener('mouseup', endDraw);
+                canvas.addEventListener('mousemove', draw);
+                canvas.addEventListener('touchstart', startDraw);
+                canvas.addEventListener('touchend', endDraw);
+                canvas.addEventListener('touchmove', draw);
+
+                window.limparCanvas = function() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                };
+                window.obterDataURLCanvas = function() {
+                    return canvas.toDataURL("image/png");
+                };
+            };
+        </script>
+    ''')
+
+    with ui.column().classes("w-full max-w-6xl mx-auto p-3 sm:p-6 gap-8 font-sans pb-32"):
+
+        # ====================================================
+        # SEÇÃO 1: FORMULÁRIO DE ANOTAÇÃO (FOLHA EM BRANCO)
+        # ====================================================
+        with ui.card().classes("w-full p-4 sm:p-6 border-2 border-purple-200 bg-purple-50/10 shadow-lg rounded-2xl gap-5"):
+            with ui.row().classes("w-full items-center justify-between border-b border-purple-100 pb-3"):
+                with ui.row().classes("items-center gap-2"):
+                    ui.icon("edit_note", size="32px").classes("text-purple-600")
+                    titulo_formulario = ui.label("Nova Anotação").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+
+            with ui.column().classes("w-full gap-4"):
+                # Campo Título
+                input_titulo = ui.input(
+                    "Título da Anotação", 
+                    placeholder="Ex: Ideias para o projeto, Minuta de reunião..."
+                ).props("outlined bg-white input-class=text-lg font-bold").classes("w-full")
+
+                # Área Principal de Anotações (Editor Amplo Visível)
+                ui.label("Conteúdo / Folha de Anotação").classes("text-base font-bold text-slate-700")
+
+                toolbar_options = "[['bold', 'italic', 'underline', 'strike'], ['quote', 'unordered', 'ordered'], ['left', 'center', 'right', 'justify'], ['token', 'hr', 'link'], ['undo', 'redo', 'fullscreen']]"
+
+                editor_conteudo = ui.editor(
+                    placeholder="Escreva livremente aqui sua anotação..."
+                ).classes("w-full bg-white border-2 border-purple-200 rounded-xl min-h-[420px] text-lg shadow-inner").props(f':toolbar="{toolbar_options}"')
+
+                # Barra de opções rápidas para cores e marca-texto no editor
+                with ui.row().classes("gap-2 items-center text-xs font-bold text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-200"):
+                    ui.label("Cores e Marca-Texto:").classes("mr-1")
+                    ui.button("Texto Vermelho", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#e11d48')")).props("dense outline color=red")
+                    ui.button("Texto Azul", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#2563eb')")).props("dense outline color=blue")
+                    ui.button("Texto Verde", on_click=lambda: ui.run_javascript("document.execCommand('foreColor', false, '#16a34a')")).props("dense outline color=green")
+                    ui.button("🟡 Marca-Texto Amarelo", on_click=lambda: ui.run_javascript("document.execCommand('hiliteColor', false, '#fef08a')")).props("dense color=warning")
+                    ui.button("🟢 Marca-Texto Verde", on_click=lambda: ui.run_javascript("document.execCommand('hiliteColor', false, '#bbf7d0')")).props("dense color=positive")
+                    ui.button("🧹 Limpar Formatação", on_click=lambda: ui.run_javascript("document.execCommand('removeFormat', false, null)")).props("dense flat color=grey")
+
+                # Área de Desenho a Mão Livre (Canvas)
+                exp_desenho = ui.expansion("🎨 Adicionar Desenho / Rascunho a Mão Livre", icon="gesture").classes(
+                    "w-full bg-white border border-purple-200 rounded-xl text-purple-900 font-bold"
+                )
+                
+                with exp_desenho:
+                    with ui.column().classes("w-full items-center gap-3 p-3"):
+                        ui.label("Utilize o mouse ou touch para desenhar no quadro abaixo:").classes("text-xs text-slate-500 font-normal")
+                        
+                        ui.html('''
+                            <div style="text-align: center;">
+                                <canvas id="sketchpad" width="750" height="280" style="border:2px dashed #a855f7; border-radius:12px; background-color:#ffffff; cursor:crosshair; touch-action:none; max-width:100%;"></canvas>
+                            </div>
+                        ''').classes("w-full")
+
+                        with ui.row().classes("gap-2"):
+                            ui.button("🧹 Limpar Desenho", on_click=lambda: ui.run_javascript("if(window.limparCanvas) window.limparCanvas();")).props("flat color=warning dense")
+                            
+                            async def anexar_desenho():
+                                img_url = await ui.run_javascript("return window.obterDataURLCanvas ? window.obterDataURLCanvas() : '';")
+                                if img_url and len(img_url) > 100:
+                                    tag_img = f'<p><img src="{img_url}" style="max-width:100%; border-radius:8px; border:1px solid #cbd5e1; margin:12px 0;" /></p>'
+                                    editor_conteudo.value = (editor_conteudo.value or "") + tag_img
+                                    ui.notify("Desenho anexado à anotação!", color="positive")
+                                    ui.run_javascript("if(window.limparCanvas) window.limparCanvas();")
+                                else:
+                                    ui.notify("Desenhe algo no quadro antes de anexar!", color="warning")
+
+                            ui.button("📌 Anexar Desenho à Anotação", on_click=anexar_desenho).classes("bg-purple-600 text-white font-bold rounded-lg text-xs")
+
+                exp_desenho.on_value_change(lambda e: ui.run_javascript("setTimeout(() => { if(window.inicializarCanvasAnotacoes) window.inicializarCanvasAnotacoes(); }, 200);") if e.value else None)
+
+            def limpar_formulario():
+                anotacao_em_edicao['id'] = None
+                titulo_formulario.set_text("Nova Anotação")
+                btn_salvar.set_text("💾 Salvar Anotação")
+                btn_cancelar.set_visibility(False)
+                input_titulo.value = ""
+                editor_conteudo.value = ""
+                ui.run_javascript("if(window.limparCanvas) window.limparCanvas();")
+
+            async def salvar_anotacao():
+                titulo_val = input_titulo.value.strip() if input_titulo.value else ""
+                conteudo_val = editor_conteudo.value.strip() if editor_conteudo.value else ""
+
+                if not titulo_val:
+                    ui.notify("Informe o título da anotação!", color="warning", size="lg")
+                    return
+
+                if not conteudo_val:
+                    ui.notify("O texto da anotação não pode ficar vazio!", color="warning", size="lg")
+                    return
+
+                current_user_id = app.storage.user.get("user_id")
+
+                try:
+                    # Obtém a data e hora atual no fuso de Brasília (ISO format)
+                    agora_brasilia = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
+
+                    payload = {
+                        "user_id": current_user_id,
+                        "titulo": titulo_val,
+                        "conteudo": conteudo_val,
+                        "updated_at": agora_brasilia
+                    }
+
+                    if anotacao_em_edicao['id']:
+                        supabase.table("anotacoes").update(payload).eq("id", anotacao_em_edicao['id']).execute()
+                        ui.notify("✅ Anotação atualizada!", color="positive", size="lg")
+                    else:
+                        # Inclui created_at explicitamente ao criar novo registro
+                        payload["created_at"] = agora_brasilia
+                        supabase.table("anotacoes").insert(payload).execute()
+                        ui.notify("✅ Anotação salva com sucesso!", color="positive", size="lg")
+
+                    limpar_formulario()
+                    carregar_e_renderizar_anotacoes()
+
+                except Exception as err:
+                    ui.notify(f"❌ Erro ao salvar: {err}", color="negative", size="lg")
+
+            with ui.row().classes("w-full gap-3 mt-2"):
+                btn_salvar = ui.button("💾 Salvar Anotação", on_click=salvar_anotacao).classes(
+                    "bg-purple-600 hover:bg-purple-700 text-white font-bold text-base flex-1 py-3 rounded-xl shadow transition-all"
+                )
+                btn_cancelar = ui.button("Cancelar", on_click=limpar_formulario).classes(
+                    "bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 px-6 rounded-xl transition-all"
+                )
+                btn_cancelar.set_visibility(False)
+
+        # ====================================================
+        # SEÇÃO 2: CONSULTA E LISTAGEM DE ANOTAÇÕES
+        # ====================================================
+        with ui.column().classes("w-full gap-4 mt-4"):
+            with ui.row().classes("w-full items-center gap-2 border-b pb-2"):
+                ui.icon("folder", size="28px").classes("text-slate-700")
+                ui.label("Minhas Anotações Guardadas").classes("text-2xl sm:text-3xl font-bold text-slate-800")
+
+            filter_busca = ui.input(
+                "Pesquisar Anotações", 
+                placeholder="Busque por título ou palavras contidas nas anotações..."
+            ).props("outlined bg-white dense icon=search").classes("w-full")
+
+            container_cards = ui.column().classes("w-full gap-4 mt-2")
+
+        def preparar_edicao(item: dict):
+            anotacao_em_edicao['id'] = item['id']
+            titulo_formulario.set_text("✏️ Editar Anotação")
+            btn_salvar.set_text("🔄 Atualizar Anotação")
+            btn_cancelar.set_visibility(True)
+
+            input_titulo.value = item.get("titulo", "")
+            editor_conteudo.value = item.get("conteudo", "")
+
+            ui.run_javascript('window.scrollTo({top: 0, behavior: "smooth"});')
+            input_titulo.run_method('focus')
+
+        def confirmar_exclusao(anotacao_id: int):
+            with ui.dialog() as dialog, ui.card().classes("p-6 gap-4 border border-slate-200 rounded-2xl max-w-sm w-full"):
+                ui.label("⚠️ Confirmar exclusão").classes("text-lg font-bold text-slate-800")
+                ui.label("Tem certeza que deseja excluir esta anotação permanentemente?").classes("text-sm text-slate-600")
+                
+                with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                    ui.button("Cancelar", on_click=dialog.close).props("flat").classes("text-slate-600")
+                    
+                    def efetuar_delecao():
+                        try:
+                            supabase.table("anotacoes").delete().eq("id", anotacao_id).execute()
+                            ui.notify("Anotação excluída!", color="info")
+                            dialog.close()
+                            carregar_e_renderizar_anotacoes()
+                        except Exception as e:
+                            ui.notify(f"Erro ao excluir anotação: {e}", color="negative")
+
+                    ui.button("Excluir", on_click=efetuar_delecao).props("unelevated color=negative").classes("rounded-lg")
+            dialog.open()
+
+        def carregar_e_renderizar_anotacoes():
+            container_cards.clear()
+
+            current_user_id = app.storage.user.get("user_id")
+            res = supabase.table("anotacoes").select("*").eq("user_id", current_user_id).order("id", desc=True).execute()
+            todas_anotacoes = res.data or []
+
+            termo = filter_busca.value.lower().strip() if filter_busca.value else ""
+
+            anotacoes_filtradas = []
+            for item in todas_anotacoes:
+                titulo_txt = item.get("titulo", "").lower()
+                conteudo_txt = item.get("conteudo", "").lower()
+
+                if termo and not (termo in titulo_txt or termo in conteudo_txt):
+                    continue
+                anotacoes_filtradas.append(item)
+
+            with container_cards:
+                if not anotacoes_filtradas:
+                    with ui.card().classes("w-full p-8 text-center bg-slate-50 border border-dashed rounded-xl"):
+                        ui.label("Nenhuma anotação encontrada.").classes("text-slate-500 font-bold text-base")
+                else:
+                    for item in anotacoes_filtradas:
+                        renderizar_card_anotacao(item)
+
+        def renderizar_card_anotacao(item):
+            a_id = item["id"]
+            
+            with ui.expansion().classes("w-full border shadow-sm rounded-xl transition-all hover:shadow-md mb-2 bg-white border-purple-200 border-l-8 border-l-purple-600") as expansion:
+                
+                with expansion.add_slot('header'):
+                    with ui.row().classes("w-full items-center justify-between pr-2 gap-2"):
+                        with ui.column().classes("gap-0.5 flex-1"):
+                            ui.label(item["titulo"]).classes("text-lg sm:text-xl text-slate-800 font-bold")
+                            
+                            # Formatação precisa com conversão de timezone para Brasília
+                            data_fmt = formatar_data_brasilia(item.get("created_at", ""))
+
+                            ui.label(data_fmt).classes("text-xs font-medium text-slate-400")
+
+                        with ui.row().classes("items-center gap-2"):
+                            ui.button(
+                                icon="edit",
+                                on_click=lambda e, it=item: preparar_edicao(it)
+                            ).props("flat round dense color=primary").classes("hover:bg-blue-50").tooltip("Editar Anotação")
+
+                            ui.button(
+                                icon="delete",
+                                on_click=lambda e, aid=a_id: confirmar_exclusao(aid)
+                            ).props("flat round dense color=negative").classes("hover:bg-red-50").tooltip("Excluir Anotação")
+
+                with ui.column().classes("w-full p-5 bg-white border-t border-slate-100 overflow-x-auto text-slate-800"):
+                    ui.html(item.get("conteudo", "")).classes("w-full prose max-w-none")
+
+        filter_busca.on("update:model-value", carregar_e_renderizar_anotacoes)
+
+        carregar_e_renderizar_anotacoes()
+
+
 @app.get("/ping")
 def ping():
     return {"status": "ok"}
@@ -2338,7 +2658,7 @@ app.add_static_files('/static', '.')
 # Adiciona o link do manifesto, ícone da Apple e registra o Service Worker em todas as páginas
 ui.add_head_html('''
     <link rel="manifest" href="/static/manifest.json">
-    <link rel="apple-touch-icon" href="/static/icon.png">
+    <link rel="apple-touch-icon" href="icon.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -2351,7 +2671,7 @@ ui.add_head_html('''
 
 ui.run(
     title="Agendamentos Pessoais",
-    favicon="/static/icon.png",  # Aponta para a rota estática criada acima
+    favicon="icon.png",  # Aponta para a rota estática criada acima
     host="0.0.0.0",
     port=PORT,
     storage_secret=os.getenv("STORAGE_SECRET", "chave_secreta_padrao_substituir_em_producao"),
