@@ -46,7 +46,6 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 PORT = int(os.environ.get("PORT", 8080))
 REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", f"http://localhost:{PORT}/oauth2callback")
 
-
 # --- FUNÇÕES AUXILIARES ---
 def obter_hora_brasilia():
     return datetime.now(ZoneInfo("America/Sao_Paulo"))
@@ -1068,6 +1067,11 @@ def home_page():
         ui.navigate.to("/login")
         return
 
+def limpar_token_google(user_id: str):
+    """Remove o token da memória para forçar uma nova reconexão limpa."""
+    if user_id in user_tokens:
+        del user_tokens[user_id]    
+
     drawer = menu_drawer()
     cabecalho_app(drawer)
     user_id = app.storage.user.get("user_id")
@@ -1119,18 +1123,27 @@ def home_page():
                     on_click=conectar_google
                 ).classes("bg-blue-600 hover:bg-blue-700 text-white font-bold text-base py-3 px-8 rounded-xl shadow mx-auto mt-2")
 
-        # ----------------------------------------------------
+# ----------------------------------------------------
         # CASO 2: CONECTADO (FORMULÁRIO AJUSTADO)
         # ----------------------------------------------------
         else:
             with ui.card().classes("w-full p-4 sm:p-6 border border-slate-200 bg-white shadow-md rounded-2xl gap-5"):
                 
-                # Indicador movido para o topo da página (no cabeçalho)
-                with ui.row().classes("w-full items-center justify-between border-b pb-3 gap-2"):
+                # Indicador movido para o topo da página com botão de Desconectar
+                with ui.row().classes("w-full items-center justify-between border-b pb-3 gap-2 flex-wrap"):
                     ui.label("➕ Cadastrar").classes("text-2xl sm:text-3xl font-bold text-slate-800")
-                    ui.label("✅ Conectado ao Google Calendar").classes(
-                        "text-xs sm:text-sm font-bold text-green-800 bg-green-100 px-3 py-1.5 rounded-lg border border-green-300"
-                    )
+                    
+                    with ui.row().classes("items-center gap-2"):
+                        ui.label("✅ Conectado ao Google Calendar").classes(
+                            "text-xs sm:text-sm font-bold text-green-800 bg-green-100 px-3 py-1.5 rounded-lg border border-green-300"
+                        )
+                        def desconectar_google():
+                            limpar_token_google(user_id)
+                            ui.notify("Conta do Google desconectada. Conecte novamente.", color="info")
+                            ui.navigate.reload()
+
+                        ui.button("Desconectar", on_click=desconectar_google).props("flat dense color=negative").classes("text-xs font-bold")
+                        
 
                 # Padronização de fontes para todos os campos
                 input_props = "outlined bg-slate-50 input-class=text-base"
@@ -3061,6 +3074,9 @@ ui.add_head_html('''
       }
     </script>
 ''', shared=True)
+
+# Captura a porta injetada pelo Koyeb/ambiente, ou usa 8080 como fallback local
+PORT = int(os.environ.get("PORT", 8080))
 
 ui.run(
     title="Agendamentos Pessoais",
